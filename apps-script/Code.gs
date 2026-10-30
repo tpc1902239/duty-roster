@@ -5,7 +5,6 @@
 
 // 放勤務的日曆名稱；留空就用帳號的預設日曆。
 const CALENDAR_NAME = '';
-const TZ = 'Asia/Taipei';
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
@@ -14,78 +13,95 @@ function doGet() {
 }
 
 // ---------- 讀試算表 ----------
+// 分頁：人員、勤務類別、設定，以及每月一頁「YYYY-MM 月班表」「YYYY-MM 存檔」（格式同 4.2 版）。
 
 const cache_ = {};
-function rows_(name) {
-  if (cache_[name]) return cache_[name];
+function sheet_(name) {
   const sh = SpreadsheetApp.getActive().getSheetByName(name);
   if (!sh) throw new Error('找不到分頁：' + name);
-  const values = sh.getDataRange().getValues();
+  return sh;
+}
+
+/** 表格式分頁（第 1 列是標題）讀成物件陣列。 */
+function rows_(name) {
+  if (cache_[name]) return cache_[name];
+  const values = sheet_(name).getDataRange().getValues();
   const header = values.shift();
   return cache_[name] = values
     .filter(r => r.some(v => v !== ''))
     .map(r => Object.fromEntries(header.map((h, i) => [h, r[i]])));
 }
 
-function ymd_(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
-  return String(v || '').trim();
+const pad_ = n => String(n).padStart(2, '0');
+const str_ = v => String(v === null || v === undefined ? '' : v).trim();
+
+/** 黑色（或接近黑色）底色 = 那天不在隊。 */
+function isBlack_(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+  return !!m && [m[1], m[2], m[3]].every(x => parseInt(x, 16) < 64);
 }
 
-function inRange_(date, from, to) {
-  const a = ymd_(from), b = ymd_(to);
-  return (!a || a <= date) && (!b || date <= b);
+/** 人員分頁：姓名 -> {alias, role, mode, status}。 */
+function staff_() {
+  return Object.fromEntries(rows_('人員').map(p => [str_(p['姓名']), {
+    alias: str_(p['別名']).split(/[、,，\s]+/).filter(Boolean),
+    role: str_(p['身分']) || '隊員', mode: str_(p['勤務方式']) || '一般', status: str_(p['狀態']) || '在隊',
+  }]));
 }
 
-/** 某一天在隊的人：{id, num, name, alias, role, counted, mode}，依番號排序。 */
-function peopleOn(date) {
-  const nums = rows_('番號期間');
-  const away = rows_('異動紀錄').filter(r => inRange_(date, r['起日'], r['迄日']));
-  const awayIds = new Set(away.map(r => r['人員ID']));
-  return rows_('人員')
-    .map(p => {
-      const n = nums.find(r => r['人員ID'] === p['人員ID'] && inRange_(date, r['起日'], r['迄日']));
-      return {
-        id: p['人員ID'], num: n ? Number(n['番號']) : null, name: p['姓名'],
-        alias: String(p['別名'] || '').split(/[、,，\s]+/).filter(Boolean),
-        role: p['身分'], counted: p['計入人力'] === 'Y', mode: p['勤務方式'] || '一般',
-      };
-    })
-    .filter(p => p.num !== null && !awayIds.has(p.id))
-    .sort((a, b) => a.num - b.num);
+/**
+ * 讀某月的月班表分頁（4.2 版格式：第 1 列番號、第 2 列姓名、A 欄日、B 欄星期、C 欄起代號）。
+ * 回傳 {people:[{num,name,col}], days:{日:{weekday, codes:[], away:[]}}}。
+ */
+function month_(year, month) {
+  const key = 'm' + year + month;
+  if (cache_[key]) return cache_[key];
+  const sh = sheet_(year + '-' + pad_(month) + ' 月班表');
+  const range = sh.getDataRange();
+  const v = range.getValues(), bg = range.getBackgrounds();
+  const people = [];
+  for (let c = 2; c < v[0].length; c++) {
+    const num = Number(v[0][c]), name = str_(v[1][c]).replace(/\s+/g, '');
+    if (num && name) people.push({ num, name, col: c });   // 「可填假人數」等沒有番號的欄自動略過
+  }
+  const days = {};
+  for (let r = 2; r < v.length; r++) {
+    const d = Number(v[r][0]);
+    if (!d || d > 31 || !str_(v[r][1])) continue;   // 沒有星期的列（例如 11/31）略過
+    days[d] = { weekday: str_(v[r][1]),
+                codes: people.map(p => str_(v[r][p.col])),
+                away: people.map(p => isBlack_(bg[r][p.col])) };
+  }
+  return cache_[key] = { people, days };
 }
 
-/** 不在隊的人與原因（給勤務表「扣除人力」用）。 */
-function awayOn(date) {
-  const names = Object.fromEntries(rows_('人員').map(p => [p['人員ID'], p['姓名']]));
-  return rows_('異動紀錄')
-    .filter(r => inRange_(date, r['起日'], r['迄日']))
-    .map(r => ({ id: r['人員ID'], name: names[r['人員ID']] || r['人員ID'], status: r['狀態'],
-                 from: ymd_(r['起日']), to: ymd_(r['迄日']), note: r['備註'] }));
+/** 某一天的名單：在隊的人（含當天代號）與不在隊的人。 */
+function dayRoster(date) {
+  const [y, m, d] = date.split('-').map(Number);
+  const mo = month_(y, m), day = mo.days[d];
+  if (!day) throw new Error(date + ' 在月班表找不到這一天');
+  const staff = staff_();
+  const here = [], away = [];
+  mo.people.forEach((p, i) => {
+    const info = staff[p.name] || { alias: [], role: '隊員', mode: '一般', status: '在隊' };
+    const row = Object.assign({ num: p.num, name: p.name, code: day.codes[i] }, info);
+    (day.away[i] || info.status === '調離' ? away : here).push(row);
+  });
+  return { weekday: day.weekday, here, away };
 }
 
-/** 一個月的月班表：人員欄依當月在隊名單產生，不在隊的日子標 null。 */
+function peopleOn(date) { return dayRoster(date).here; }
+function awayOn(date) { return dayRoster(date).away; }
+
+/** 一個月的月班表，給測試頁顯示；不在隊的格子是 null。 */
 function monthRoster(year, month) {
-  const pad = n => String(n).padStart(2, '0');
-  const prefix = year + '-' + pad(month) + '-';
-  const last = new Date(year, month, 0).getDate();
-  const dates = Array.from({ length: last }, (_, i) => prefix + pad(i + 1));
-  const codes = {};
-  rows_('月班表').forEach(r => {
-    const d = ymd_(r['日期']);
-    if (d.startsWith(prefix)) (codes[d] = codes[d] || {})[r['人員ID']] = String(r['代號'] || '');
-  });
-  const people = {};
-  const days = dates.map(d => {
-    const here = peopleOn(d);
-    here.forEach(p => { people[p.id] = people[p.id] || p; });
-    const ids = new Set(here.map(p => p.id));
-    return { date: d, here: [...ids], codes: codes[d] || {} };
-  });
+  const mo = month_(year, month);
   return {
-    people: Object.values(people).sort((a, b) => a.num - b.num),
-    days: days.map(d => ({ date: d.date,
-      codes: Object.fromEntries(Object.keys(people).map(id => [id, d.here.includes(id) ? (d.codes[id] || '') : null])) })),
+    people: mo.people.map(p => ({ num: p.num, name: p.name })),
+    days: Object.keys(mo.days).map(Number).sort((a, b) => a - b).map(d => ({
+      date: year + '-' + pad_(month) + '-' + pad_(d),
+      codes: mo.days[d].codes.map((c, i) => (mo.days[d].away[i] ? null : c)),
+    })),
   };
 }
 
@@ -126,7 +142,7 @@ function calendarOn(date) {
     const matched = t.names.map(n => ({ name: n, person: find(n) || null }));
     return Object.assign(t, {
       allDay: ev.isAllDayEvent(),
-      people: matched.filter(x => x.person).map(x => x.person.id),
+      people: matched.filter(x => x.person).map(x => x.person.name),
       unknown: matched.filter(x => !x.person).map(x => x.name),
       kind: ev.isAllDayEvent() || t.start === null ? '備註' : t.rest ? '休息' : t.names.length ? '指定人' : '待排',
     });

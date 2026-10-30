@@ -45,19 +45,19 @@ $('go').onclick = () => {
 
 function render(d) {
   $('msg').textContent = '';
-  const name = Object.fromEntries(d.month.people.map(p => [p.id, p.num + '.' + p.name]));
+  const num = Object.fromEntries(d.month.people.map(p => [p.name, p.num]));
   const ev = d.events.map(e => `<tr class="${e.unknown.length ? 'warn' : ''}">
       <td>${esc(e.kind)}</td><td>${esc(e.duty)}</td>
       <td>${e.start === null ? '' : esc(e.start + '–' + e.end)}</td>
-      <td>${e.people.map(id => esc(name[id] || id)).join('、')}</td>
+      <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
       <td>${e.unknown.map(esc).join('、')}</td><td class="muted">${esc(e.title)}</td></tr>`).join('');
   const head = d.month.people.map(p => `<th>${esc(p.num)}</th>`).join('');
-  const body = d.month.days.map(day => `<tr class="${day.date === d.date ? 'today' : ''}"><td>${esc(day.date.slice(5))}</td>` +
-    d.month.people.map(p => day.codes[p.id] === null ? '<td class="off">—</td>' : `<td>${esc(day.codes[p.id])}</td>`).join('') + '</tr>').join('');
+  const body = d.month.days.map(day => `<tr class="${day.date === d.date ? 'today' : ''}"><td>${esc(day.date.slice(8))}</td>` +
+    day.codes.map(c => c === null ? '<td class="off">—</td>' : `<td>${esc(c)}</td>`).join('') + '</tr>').join('');
   $('out').innerHTML = `
     <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
       <div>${d.here.map(p => esc(p.num + '.' + p.name)).join('　')}</div>
-      ${d.away.length ? `<div class="muted">不在隊：${d.away.map(a => esc(`${a.name}（${a.status}，${a.from}～${a.to}）`)).join('、')}</div>` : ''}
+      ${d.away.length ? `<div class="muted">不在隊：${d.away.map(a => esc(a.num + '.' + a.name)).join('、')}</div>` : ''}
     </div>
     <div class="card"><h2>日曆</h2>
       ${d.events.length ? `<div class="scroll"><table><tr><th>類型</th><th>勤務</th><th>時間</th><th>人員</th><th>對不到的人名</th><th>原標題</th></tr>${ev}</table></div>`
