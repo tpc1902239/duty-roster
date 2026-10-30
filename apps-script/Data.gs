@@ -82,6 +82,92 @@ function saveShiftDefs(token, defs, version) {
   });
 }
 
+// ---------- 編制人員 ----------
+
+const STAFF_STATUS = ['在隊', '不在隊', '算人力', '不計人力'];
+const STAFF_HEAD = ['姓名', '番號', '在勤狀況', '限排時間', '限排勤務'];
+
+/** 「編制人員」分頁：姓名、番號、在勤狀況、限排時間（空白＝不限）、限排勤務（空白＝不限）。 */
+function unitStaff_() {
+  if (!SpreadsheetApp.getActive().getSheetByName('編制人員')) return [];
+  return rows_('編制人員').map(r => ({
+    name: str_(r['姓名']).replace(/\s+/g, ''), num: Number(r['番號']) || '', status: str_(r['在勤狀況']) || '在隊',
+    hours: str_(r['限排時間']).split(/[,，、\s]+/).filter(h => h).map(h => pad_(Number(h))),
+    kind: str_(r['限排勤務']),
+  })).filter(p => p.name);
+}
+
+function getUnitStaff(token) {
+  need_(token);
+  return { staff: unitStaff_(), version: version_('編制人員') };
+}
+
+function saveUnitStaff(token, staff, version) {
+  const s = need_(token, '管理員');
+  const seen = {};
+  staff.forEach(p => {
+    p.name = str_(p.name).replace(/\s+/g, '');
+    if (!p.name) throw new Error('姓名不能空白');
+    if (seen[p.name]) throw new Error('姓名重複：' + p.name);
+    seen[p.name] = true;
+    if (!(Number(p.num) > 0)) throw new Error(p.name + '：番號要是數字');
+    if (STAFF_STATUS.indexOf(p.status) < 0) throw new Error(p.name + '：在勤狀況要選' + STAFF_STATUS.join('、'));
+    if (p.kind && DUTY_KINDS.indexOf(p.kind) < 0) throw new Error(p.name + '：限排勤務只能是' + DUTY_KINDS.join('或') + '或空白');
+    if (p.hours.some(h => HOURS.indexOf(h) < 0)) throw new Error(p.name + '：時間不對');
+  });
+  return guarded_('編制人員', version, () => {
+    const ss = SpreadsheetApp.getActive();
+    const sh = ss.getSheetByName('編制人員') || ss.insertSheet('編制人員');
+    const values = [STAFF_HEAD].concat(staff.map(p =>
+      [p.name, Number(p.num), p.status, HOURS.filter(h => p.hours.indexOf(h) >= 0).join(','), p.kind || '']));
+    sh.clear();
+    sh.getRange(1, 1, values.length, STAFF_HEAD.length).setNumberFormat('@').setValues(values);
+    sh.getRange(1, 1, 1, STAFF_HEAD.length).setFontWeight('bold').setBackground('#ddebf7');
+    sh.setFrozenRows(1);
+    delete cache_['編制人員'];
+    log_(s.user, '編制人員', staff.length + ' 人');
+    return { count: staff.length };
+  });
+}
+
+// ---------- 累計基準 ----------
+// 系統上線前的全年累計（例如 4.2 版 10 月月班表的「累計」宿／A／B 列），之後每月往上加。
+
+function base_(y) {
+  if (!SpreadsheetApp.getActive().getSheetByName('累計基準')) return null;
+  const rows = rows_('累計基準').filter(r => Number(r['年']) === Number(y));
+  if (!rows.length) return null;
+  const counts = {};
+  rows.forEach(r => {
+    const c = counts[str_(r['姓名'])] = {};
+    ['宿', 'A', 'B'].forEach(g => { if (Number(r[g])) c[g] = Number(r[g]); });
+  });
+  return { month: Number(rows[0]['截至月']), counts };
+}
+
+/** rows = [{name, 宿, A, B}]，代表 y 年 1 月到 m 月（含）的累計。 */
+function saveBase(token, y, m, rows) {
+  const s = need_(token, '排班');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const sh = ss.getSheetByName('累計基準') || ss.insertSheet('累計基準');
+    const keep = sh.getLastRow() > 1 ? sh.getDataRange().getValues().slice(1).filter(r => Number(r[0]) !== Number(y)) : [];
+    const values = [['年', '截至月', '姓名', '宿', 'A', 'B']].concat(keep,
+      rows.map(r => [y, m, str_(r.name), Number(r['宿']) || 0, Number(r.A) || 0, Number(r.B) || 0]));
+    sh.clear();
+    sh.getRange(1, 1, values.length, 6).setValues(values);
+    sh.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#ddebf7');
+    sh.setFrozenRows(1);
+    delete cache_['累計基準'];
+    log_(s.user, '匯入累計基準', y + ' 年截至 ' + m + ' 月，' + rows.length + ' 人');
+    return { count: rows.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ---------- 月班表 ----------
 
 /** 讀月班表給網頁：{exists, people:[{num,name}], days:[{d,weekday,codes,away}], version}。 */
@@ -175,13 +261,19 @@ function saveShifts(token, y, m, changes, version) {
 }
 
 /**
- * 同一年 1 月到 (m-1) 月，每個人各個固定排班的次數（給「已排次數」累計用；這個月由網頁自己算）。
- * 回傳 {before: {姓名: {名稱: 次數}}}
+ * 全年累計（不含這個月，這個月由網頁自己算）：有「累計基準」就從基準往上加，否則從 1 月算起。
+ * 回傳 {before: {姓名: {名稱或分組: 次數}}, baseMonth}；基準只有分組（宿／A／B）。
  */
 function getShiftCounts(token, y, m) {
   need_(token);
   const names = shiftNames_(), before = {};
-  for (let k = 1; k < m; k++) {
+  const base = base_(y);
+  let from = 1;
+  if (base && base.month < m) {
+    from = base.month + 1;
+    Object.keys(base.counts).forEach(n => { before[n] = Object.assign({}, base.counts[n]); });
+  }
+  for (let k = from; k < m; k++) {
     if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, k, '月班表'))) continue;
     const mo = month_(y, k);
     Object.keys(mo.days).forEach(d => mo.days[d].codes.forEach((c, i) => {
@@ -190,7 +282,7 @@ function getShiftCounts(token, y, m) {
       who[c] = (who[c] || 0) + 1;
     }));
   }
-  return { before };
+  return { before, baseMonth: base && base.month < m ? base.month : 0 };
 }
 
 // ---------- 車輛、救護訓練 ----------
