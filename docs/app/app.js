@@ -77,12 +77,12 @@
     const num = Object.fromEntries(d.month.people.map(p => [p.name, p.num]));
     const ev = d.events.map(e => `<tr class="${e.unknown.length ? 'warn' : ''}">
         <td>${esc(e.kind)}</td><td class="l">${esc(e.duty)}</td>
-        <td>${e.start === null ? '' : esc(e.start + '–' + e.end)}</td>
+        <td>${e.start == null ? '' : esc(e.start + '–' + e.end)}</td>
         <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
         <td>${e.unknown.map(esc).join('、')}</td><td class="l muted">${esc(e.title)}</td></tr>`).join('');
     const head = d.month.people.map(p => `<th>${esc(p.num)}</th>`).join('');
     const body = d.month.days.map(day => `<tr class="${day.date === d.date ? 'today' : ''}"><td>${esc(day.date.slice(8))}</td>` +
-      day.codes.map(c => (c === null ? '<td class="off">—</td>' : `<td>${esc(c)}</td>`)).join('') + '</tr>').join('');
+      day.codes.map(c => (c == null ? '<td class="off">—</td>' : `<td>${esc(c)}</td>`)).join('') + '</tr>').join('');
     return `
       <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
         <div>${d.here.map(p => esc(p.num + '.' + p.name)).join('　')}</div>
