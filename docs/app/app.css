@@ -1,6 +1,6 @@
-:root { --bg:#f6f7f9; --card:#fff; --text:#1f2328; --muted:#656d76; --line:#d8dee4; --accent:#c0392b; --accent-text:#fff; --off:#eceff1; --warn:#fff4d6; --ok:#e5f4e4; }
+:root { --g0:#c9daf0; --g1:#ffffff; --g2:#dcebd5; --g3:#ffffff; --g4:#dcebd5; --g5:#f3e6f5; --wk:#c0392b; --bg:#f6f7f9; --card:#fff; --text:#1f2328; --muted:#656d76; --line:#d8dee4; --accent:#c0392b; --accent-text:#fff; --off:#eceff1; --warn:#fff4d6; --ok:#e5f4e4; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#16181c; --card:#1f2228; --text:#e6e8eb; --muted:#9aa3ad; --line:#353a42; --accent:#e06455; --accent-text:#fff; --off:#2a2e35; --warn:#4a3d16; --ok:#1f3a24; }
+  :root { --g0:#23344d; --g1:#1f2228; --g2:#22331f; --g3:#1f2228; --g4:#22331f; --g5:#36263a; --wk:#e06455; --bg:#16181c; --card:#1f2228; --text:#e6e8eb; --muted:#9aa3ad; --line:#353a42; --accent:#e06455; --accent-text:#fff; --off:#2a2e35; --warn:#4a3d16; --ok:#1f3a24; }
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, "Noto Sans TC", sans-serif; }
@@ -28,3 +28,8 @@ td.off { background:var(--off); color:var(--muted); }
 tr.today td { font-weight:bold; }
 .warn { background:var(--warn); }
 .chips label { margin-right:10px; white-space:nowrap; }
+.roster .g0 { background:var(--g0); } .roster .g1 { background:var(--g1); } .roster .g2 { background:var(--g2); }
+.roster .g3 { background:var(--g3); } .roster .g4 { background:var(--g4); } .roster .g5 { background:var(--g5); }
+.roster th.name { line-height:1.15; padding:4px 2px; font-weight:600; vertical-align:top; }
+.roster td.wkend { color:var(--wk); font-weight:600; }
+.roster td.off { background:var(--off); }

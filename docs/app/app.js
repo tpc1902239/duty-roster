@@ -77,12 +77,21 @@
     const num = Object.fromEntries(d.month.people.map(p => [p.name, p.num]));
     const ev = d.events.map(e => `<tr class="${e.unknown.length ? 'warn' : ''}">
         <td>${esc(e.kind)}</td><td class="l">${esc(e.duty)}</td>
-        <td>${e.start === null ? '' : esc(e.start + '–' + e.end)}</td>
+        <td>${e.start == null ? '' : esc(e.start + '–' + e.end)}</td>
         <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
         <td>${e.unknown.map(esc).join('、')}</td><td class="l muted">${esc(e.title)}</td></tr>`).join('');
-    const head = d.month.people.map(p => `<th>${esc(p.num)}</th>`).join('');
-    const body = d.month.days.map(day => `<tr class="${day.date === d.date ? 'today' : ''}"><td>${esc(day.date.slice(8))}</td>` +
-      day.codes.map(c => (c === null ? '<td class="off">—</td>' : `<td>${esc(c)}</td>`)).join('') + '</tr>').join('');
+    // 番號依十位數分組上色（個位數＝幹部、1x、2x、3x、4x…），同 4.2 版月班表
+    const grp = p => `g${Math.min(Math.floor(p.num / 10), 5)}`;
+    const WEEK = '日一二三四五六';
+    const weekday = date => WEEK[new Date(date + 'T00:00:00Z').getUTCDay()];
+    const nums = d.month.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
+    const names = d.month.people.map(p => `<th class="${grp(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('');
+    const body = d.month.days.map(day => {
+      const w = weekday(day.date);
+      return `<tr class="${day.date === d.date ? 'today' : ''}"><td>${Number(day.date.slice(8))}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` +
+        day.codes.map((c, i) => (c == null ? '<td class="off">—</td>' : `<td class="${grp(d.month.people[i])}">${esc(c)}</td>`)).join('') + '</tr>';
+    }).join('');
+    const [yy, mm] = d.date.split('-').map(Number);
     return `
       <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
         <div>${d.here.map(p => esc(p.num + '.' + p.name)).join('　')}</div>
@@ -92,7 +101,8 @@
         ${d.events.length ? `<div class="scroll"><table><tr><th>類型</th><th>勤務</th><th>時間</th><th>人員</th><th>對不到的人名</th><th>原標題</th></tr>${ev}</table></div>`
                           : '<div class="muted">這天日曆沒有活動。</div>'}
       </div>
-      <div class="card"><h2>月班表</h2><div class="scroll"><table><tr><th>日</th>${head}</tr>${body}</table></div></div>`;
+      <div class="card"><h2>${yy} 年 ${mm} 月 月班表</h2><div class="scroll"><table class="roster">
+        <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div></div>`;
   }
 
   // ---------- 帳號管理 ----------
