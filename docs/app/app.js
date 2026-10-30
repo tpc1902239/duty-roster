@@ -46,6 +46,7 @@
 
   const PAGES = [
     { id: 'month', name: '月班表', show: () => true },
+    { id: 'shiftdefs', name: '固定排班設定', show: () => true },
     { id: 'leave', name: '匯入假表', show: () => has('假表承辦') },
     { id: 'tables', name: '車輛／救護訓練', show: () => has('車輛承辦') || has('救護訓練承辦') },
     { id: 'read', name: '讀取測試', show: () => true },
@@ -59,7 +60,7 @@
       PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ month: pageMonth, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ month: pageMonth, shiftdefs: pageShiftDefs, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 讀取測試 ----------
@@ -101,8 +102,7 @@
   // ---------- 共用：月班表表格 ----------
 
   const WEEK = '日一二三四五六';
-  const SHIFT = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', '宿'];
-  const has = role => me.roles.includes(role) || isAdmin();
+    const has = role => me.roles.includes(role) || isAdmin();
   // 番號依十位數分組上色（個位數＝幹部、1x、2x、3x、4x…），同 4.2 版月班表
   const grp = p => `g${Math.min(Math.floor(p.num / 10), 5)}`;
   const weekdayOf = (y, m, d) => WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -123,60 +123,101 @@
           ? `<td class="off" data-d="${day.d}" data-i="${i}">—</td>`
           : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''}" data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') + '</tr>';
     }).join('');
-    return `<h2>${opts.title || `${y} 年 ${m} 月 月班表`}</h2><div class="scroll"><table class="roster">
+    return `<h2>${opts.title || `${y}年${m}月班表`}</h2><div class="scroll"><table class="roster">
       <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div>`;
   }
 
-  // ---------- 月班表（檢視、改 A／B／宿） ----------
+  // ---------- 月班表（檢視、填固定排班） ----------
+
+  // 「已排次數」分組：名稱去掉尾巴的數字（A1、A2 → A；B1 → B；宿 → 宿），同 4.2 版月班表下方
+  const group = name => name.replace(/\d+$/, '') || name;
 
   function pageMonth(main) {
     const edit = has('排班');
     main.innerHTML = `<h1>月班表</h1>
-      <div class="muted">${edit ? '點格子可以填 A／B／宿；有假別的格子不能改。改完按「儲存」。' : '只能檢視。'}</div>
+      <div class="muted">${edit ? '點格子選固定排班（同一天別人選過的不能再選），也可以手動輸入或清除；黑格不能改。改完按「儲存」。' : '只能檢視。'}</div>
       <div class="card"><input type="month" id="mon"> <button id="go">讀取</button>
         ${edit ? '<button id="save" disabled>儲存</button> <button class="plain" id="undo" disabled>放棄修改</button>' : ''}
+        <button class="plain" id="cnt">已排次數</button>
         <span id="msg" class="muted"></span></div>
-      <div class="card" id="out" hidden></div><div id="pick" class="picker" hidden></div>`;
+      <div class="card" id="out" hidden></div><div class="card" id="stats" hidden></div><div id="pick" class="picker" hidden></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
-    let data = null, pending = {};   // pending['d|姓名'] = code
+    let data = null, defs = [], before = {}, pending = {};   // pending['d|姓名'] = code
     const key = (d, i) => d + '|' + data.people[i].name;
+    const codeAt = (d, i) => (key(d, i) in pending ? pending[key(d, i)] : data.days[d - 1].codes[i]);
+    const names = () => defs.map(x => x.name);
     const draw = () => {
       const [y, m] = ym($('#mon').value);
-      const days = data.days.map(day => Object.assign({}, day, {
-        codes: day.codes.map((c, i) => (key(day.d, i) in pending ? pending[key(day.d, i)] : c)) }));
+      const days = data.days.map(day => Object.assign({}, day, { codes: day.codes.map((c, i) => codeAt(day.d, i)) }));
       $('#out').innerHTML = rosterTable(y, m, data.people, days, {
-        mark: (d, i) => (key(d, i) in pending ? 'changed' : (edit && (!data.days[d - 1].codes[i] || SHIFT.includes(data.days[d - 1].codes[i])) ? 'editable' : '')),
+        mark: (d, i) => (key(d, i) in pending ? 'changed' : edit ? 'editable' : ''),
       });
       const n = Object.keys(pending).length;
       if (edit) { $('#save').disabled = $('#undo').disabled = !n; $('#save').textContent = n ? `儲存（${n} 格）` : '儲存'; }
+      if (!$('#stats').hidden) drawStats();
+    };
+    // 已排次數：當月（含還沒儲存的修改）＋今年累計，欄位跟月班表一樣
+    const drawStats = () => {
+      const [y, m] = ym($('#mon').value);
+      const groups = [...new Set(names().map(group))];
+      const now = data.people.map(() => ({}));
+      data.days.forEach(day => data.people.forEach((p, i) => {
+        const c = codeAt(day.d, i);
+        if (names().includes(c)) now[i][group(c)] = (now[i][group(c)] || 0) + 1;
+      }));
+      const total = data.people.map((p, i) => {
+        const t = Object.assign({}, now[i]);
+        Object.entries(before[p.name] || {}).forEach(([c, n]) => { t[group(c)] = (t[group(c)] || 0) + n; });
+        return t;
+      });
+      const rows = (label, arr) => groups.map((g, k) => `<tr>${k ? '' : `<th rowspan="${groups.length}">${label}</th>`}<th>${esc(g)}</th>` +
+        data.people.map((p, i) => `<td class="${grp(p)}">${arr[i][g] || 0}</td>`).join('') + '</tr>').join('');
+      $('#stats').innerHTML = groups.length ? `<h2>${y}年${m}月 已排次數</h2><div class="scroll"><table class="roster">
+        <tr><th rowspan="2" colspan="2"></th>${data.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('')}</tr>
+        <tr>${data.people.map(p => `<th class="${grp(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>
+        ${rows('當月', now)}${rows(`累計（${y}年1～${m}月）`, total)}</table></div>`
+        : '<div class="muted">還沒有固定排班設定。</div>';
     };
     const load = (done = '') => {
       const [y, m] = ym($('#mon').value);
       $('#msg').textContent = '讀取中…'; pending = {};
-      call('getMonth', y, m).then(d => {
-        data = d;
-        if (!d.exists) { $('#out').hidden = true; $('#msg').textContent = `${y} 年 ${m} 月還沒有月班表，請先匯入假表。`; return; }
+      Promise.all([call('getMonth', y, m), call('getShiftDefs'), call('getShiftCounts', y, m)]).then(([d, sd, sc]) => {
+        data = d; defs = sd.defs; before = sc.before;
+        if (!d.exists) { $('#out').hidden = $('#stats').hidden = true; $('#msg').textContent = `${y} 年 ${m} 月還沒有月班表，請先匯入假表。`; return; }
         $('#msg').textContent = done; $('#out').hidden = false; draw();
       }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
     };
     $('#go').onclick = $('#mon').onchange = () => load();
+    $('#cnt').onclick = () => {
+      if (!data || !data.exists) return;
+      $('#stats').hidden = !$('#stats').hidden;
+      if (!$('#stats').hidden) { drawStats(); $('#stats').scrollIntoView({ behavior: 'smooth' }); }
+    };
     if (edit) {
       $('#out').onclick = ev => {
         const td = ev.target.closest('td.editable, td.changed');
         if (!td) return;
         const d = Number(td.dataset.d), i = Number(td.dataset.i);
+        const used = new Set(data.people.map((p, j) => (j === i ? '' : codeAt(d, j))));   // 同一天別人已經選的
         const pick = $('#pick'), r = td.getBoundingClientRect();
         pick.innerHTML = `<div class="muted">${d} 日 ${esc(data.people[i].name)}</div>` +
-          SHIFT.map(c => `<button class="plain" data-c="${c}">${c}</button>`).join('') + '<button class="plain" data-c="">清除</button>';
-        pick.style.left = Math.min(r.left + scrollX, innerWidth - 220) + 'px';
+          (defs.length ? names().map(c => `<button class="plain" data-c="${esc(c)}" ${used.has(c) ? 'disabled title="這天已經有人選了"' : ''}>${esc(c)}</button>`).join('')
+            : '<div class="muted">還沒有固定排班設定</div>') +
+          `<div class="manual"><input id="man" value="${esc(codeAt(d, i))}" placeholder="手動輸入"><button class="plain" id="manok">填入</button></div>` +
+          '<button class="plain" data-c="">清除</button>';
+        pick.style.left = Math.min(r.left + scrollX, innerWidth - 240) + 'px';
         pick.style.top = r.bottom + scrollY + 4 + 'px';
         pick.hidden = false;
-        pick.onclick = e2 => {
-          const b = e2.target.closest('button'); if (!b) return;
+        const set = c => {
           const orig = data.days[d - 1].codes[i], k = key(d, i);
-          if (b.dataset.c === orig) delete pending[k]; else pending[k] = b.dataset.c;
+          if (c === orig) delete pending[k]; else pending[k] = c;
           pick.hidden = true; draw();
+        };
+        pick.querySelector('#man').onkeydown = e2 => { if (e2.key === 'Enter') set(e2.target.value.trim()); };
+        pick.onclick = e2 => {
+          const b = e2.target.closest('button'); if (!b || b.disabled) return;
+          set(b.id === 'manok' ? pick.querySelector('#man').value.trim() : b.dataset.c);
         };
       };
       const close = e => {   // 換頁後這頁的元素就不在了，順便拿掉監聽
@@ -191,6 +232,55 @@
         $('#msg').textContent = '儲存中…';
         call('saveShifts', y, m, changes, data.version)
           .then(r => load(`已儲存 ${r.saved} 格。`))
+          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+      };
+    }
+    load();
+  }
+
+  // ---------- 固定排班設定 ----------
+
+  const HOURS = ['08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '00', '01', '02', '03', '04', '05', '06', '07'];
+  const KINDS = ['值班', '救護'];
+
+  function pageShiftDefs(main) {
+    const edit = has('排班');
+    main.innerHTML = `<h1>固定排班設定</h1>
+      <div class="muted">月班表點格子時，只會出現這裡設定的名稱。時間從早上 08 到隔天 07，勾選這個班要上的小時。</div>
+      <div class="card"><div class="scroll" id="list"></div>
+        ${edit ? '<p><button class="plain" id="add">＋ 新增</button> <button id="save">儲存</button> <span id="msg" class="muted"></span></p>' : ''}</div>`;
+    const $ = s => main.querySelector(s);
+    let defs = [], version = 0;
+    const draw = () => {
+      $('#list').innerHTML = `<table class="defs"><tr><th>名稱</th>${HOURS.map(h => `<th>${h}</th>`).join('')}<th>勤務別</th>${edit ? '<th></th>' : ''}</tr>` +
+        defs.map((d, k) => `<tr data-k="${k}">
+          <td><input class="nm" value="${esc(d.name)}" size="5" ${edit ? '' : 'disabled'}></td>
+          ${HOURS.map(h => `<td><input type="checkbox" data-h="${h}" ${d.hours.includes(h) ? 'checked' : ''} ${edit ? '' : 'disabled'}></td>`).join('')}
+          <td><select class="kd" ${edit ? '' : 'disabled'}>${KINDS.map(x => `<option ${x === d.kind ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
+          ${edit ? '<td><button class="plain del">刪除</button></td>' : ''}</tr>`).join('') + '</table>' +
+        (defs.length ? '' : '<div class="muted">還沒有設定。</div>');
+    };
+    const read = () => {   // 畫面上的值讀回 defs
+      main.querySelectorAll('tr[data-k]').forEach(tr => {
+        const d = defs[Number(tr.dataset.k)];
+        d.name = tr.querySelector('.nm').value.trim();
+        d.kind = tr.querySelector('.kd').value;
+        d.hours = [...tr.querySelectorAll('input[data-h]:checked')].map(x => x.dataset.h);
+      });
+    };
+    const load = (done = '') => call('getShiftDefs').then(r => {
+      defs = r.defs; version = r.version; draw();
+      if ($('#msg')) $('#msg').textContent = done;
+    });
+    if (edit) {
+      $('#add').onclick = () => { read(); defs.push({ name: '', hours: [], kind: KINDS[0] }); draw(); main.querySelector('tr[data-k]:last-child .nm').focus(); };
+      $('#list').onclick = e => {
+        const b = e.target.closest('.del'); if (!b) return;
+        read(); defs.splice(Number(b.closest('tr').dataset.k), 1); draw();
+      };
+      $('#save').onclick = () => {
+        read(); $('#msg').textContent = '儲存中…';
+        call('saveShiftDefs', defs, version).then(r => load(`已儲存 ${r.count} 個。`))
           .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
       };
     }
@@ -279,7 +369,7 @@
   function pageLeave(main) {
     main.innerHTML = `<h1>匯入假表</h1>
       <div class="muted">上傳假表 Excel（格式同 4.2 版月班表：第 1 列番號、第 2 列姓名、A 欄日、B 欄星期）。黑色格子＝那天不在隊。<br>
-      這個月已經有月班表時，已填的 A／B／宿 在假表空白的格子會保留。</div>
+      這個月已經有月班表時，已填的固定排班（A1、B1、宿…）在假表空白的格子會保留。</div>
       <div class="card"><label>月份 <input type="month" id="mon"></label>
         <input type="file" id="file" accept=".xlsx,.xlsm"> <span id="msg" class="muted"></span></div>
       <div class="card" id="out" hidden></div>`;
@@ -303,7 +393,7 @@
           $('#ok').disabled = true; $('#msg').textContent = '匯入中…';
           call('getMonth', y, m)
             .then(cur => call('importLeave', y, m, { people: parsed.people, days: parsed.days }, cur.version))
-            .then(r => { $('#msg').textContent = `已匯入 ${y} 年 ${m} 月，保留 A／B／宿 ${r.kept} 格。`; $('#out').hidden = true; })
+            .then(r => { $('#msg').textContent = `已匯入 ${y} 年 ${m} 月，保留固定排班 ${r.kept} 格。`; $('#out').hidden = true; })
             .catch(e => { $('#msg').textContent = '錯誤：' + e.message; $('#ok').disabled = false; });
         };
       }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });

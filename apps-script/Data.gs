@@ -1,9 +1,11 @@
 /**
- * 資料維護：月班表（匯入假表、改 A／B／宿）、車輛、救護訓練。
+ * 資料維護：月班表（匯入假表、填固定排班）、車輛、救護訓練。
  * 每個分頁有一個版本號，存檔時版本不同就拒絕（別人在你打開之後改過），避免互相蓋掉。
  */
 
-const SHIFT_CODES = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', '宿'];
+const SHIFT_CODES = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', '宿'];   // 還沒有「固定排班」分頁時用
+const DUTY_KINDS = ['值班', '救護'];
+const HOURS = ['08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '00', '01', '02', '03', '04', '05', '06', '07'];
 const GROUP_BG = ['#c9daf0', '#ffffff', '#dcebd5', '#ffffff', '#dcebd5', '#f3e6f5'];
 const TABLES = { '車輛': '車輛承辦', '救護訓練': '救護訓練承辦' };
 
@@ -30,6 +32,54 @@ function guarded_(name, version, fn) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------- 固定排班設定 ----------
+
+/** 「固定排班」分頁：名稱（A1…）、時間（08,09,…）、勤務別（值班／救護）。 */
+function shiftDefs_() {
+  if (!SpreadsheetApp.getActive().getSheetByName('固定排班')) return [];
+  return rows_('固定排班').map(r => ({
+    name: str_(r['名稱']), kind: str_(r['勤務別']),
+    hours: str_(r['時間']).split(/[,，、\s]+/).filter(h => h).map(h => pad_(Number(h))),
+  })).filter(d => d.name);
+}
+
+/** 月班表上算「固定排班」的代碼：設定裡的名稱；還沒設定就用 A1～B3、宿。 */
+function shiftNames_() {
+  const defs = shiftDefs_();
+  return defs.length ? defs.map(d => d.name) : SHIFT_CODES;
+}
+
+function getShiftDefs(token) {
+  need_(token);
+  return { defs: shiftDefs_(), version: version_('固定排班') };
+}
+
+function saveShiftDefs(token, defs, version) {
+  const s = need_(token, '排班');
+  const seen = {};
+  defs.forEach(d => {
+    d.name = str_(d.name);
+    if (!d.name) throw new Error('名稱不能空白');
+    if (seen[d.name]) throw new Error('名稱重複：' + d.name);
+    seen[d.name] = true;
+    if (DUTY_KINDS.indexOf(d.kind) < 0) throw new Error(d.name + '：勤務別要選' + DUTY_KINDS.join('或'));
+    if (!d.hours.length || d.hours.some(h => HOURS.indexOf(h) < 0)) throw new Error(d.name + '：請勾選時間');
+  });
+  return guarded_('固定排班', version, () => {
+    const ss = SpreadsheetApp.getActive();
+    const sh = ss.getSheetByName('固定排班') || ss.insertSheet('固定排班');
+    const values = [['名稱', '時間', '勤務別']].concat(defs.map(d =>
+      [d.name, HOURS.filter(h => d.hours.indexOf(h) >= 0).join(','), d.kind]));
+    sh.clear();
+    sh.getRange(1, 1, values.length, 3).setNumberFormat('@').setValues(values);
+    sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#ddebf7');
+    sh.setFrozenRows(1);
+    delete cache_['固定排班'];
+    log_(s.user, '固定排班設定', defs.map(d => d.name).join('、'));
+    return { count: defs.length };
+  });
 }
 
 // ---------- 月班表 ----------
@@ -71,7 +121,7 @@ function writeMonth_(y, m, grid) {
 }
 
 /**
- * 匯入假表。已經填好的 A／B／宿，假表那格空白就保留；其他格子以假表為準。
+ * 匯入假表。已經填好的固定排班（A1、宿…），假表那格空白就保留；其他格子以假表為準。
  * grid：{people:[{num,name}], days:[{d,weekday,codes,away}]}
  */
 function importLeave(token, y, m, grid, version) {
@@ -79,6 +129,7 @@ function importLeave(token, y, m, grid, version) {
   const name = sheetName_(y, m, '月班表');
   return guarded_(name, version, () => {
     let kept = 0;
+    const names = shiftNames_();
     if (SpreadsheetApp.getActive().getSheetByName(name)) {
       const old = month_(y, m);
       const col = Object.fromEntries(old.people.map((p, i) => [p.name, i]));
@@ -87,17 +138,17 @@ function importLeave(token, y, m, grid, version) {
         if (!prev) return;
         grid.people.forEach((p, i) => {
           const c = prev.codes[col[p.name]];
-          if (!str_(day.codes[i]) && !day.away[i] && SHIFT_CODES.includes(c)) { day.codes[i] = c; kept++; }
+          if (!str_(day.codes[i]) && !day.away[i] && names.indexOf(c) >= 0) { day.codes[i] = c; kept++; }
         });
       });
     }
     writeMonth_(y, m, grid);
-    log_(s.user, '匯入假表', name + '：' + grid.people.length + ' 人、' + grid.days.length + ' 天，保留 A／B／宿 ' + kept + ' 格');
+    log_(s.user, '匯入假表', name + '：' + grid.people.length + ' 人、' + grid.days.length + ' 天，保留固定排班 ' + kept + ' 格');
     return { kept };
   });
 }
 
-/** 改 A／B／宿：changes = [{name, d, code}]，code 只能是 A／B／宿或空白，而且不能蓋掉假別。 */
+/** 排班的人改月班表格子：changes = [{name, d, code}]。黑格（不在隊）不能改。 */
 function saveShifts(token, y, m, changes, version) {
   const s = need_(token, '排班');
   const name = sheetName_(y, m, '月班表');
@@ -111,16 +162,35 @@ function saveShifts(token, y, m, changes, version) {
     changes.forEach(c => {
       const i = col[c.name], day = mo.days[c.d];
       const cur = day && i !== undefined ? day.codes[i] : null;
+      c.code = str_(c.code);
       if (cur === null || day.away[i]) bad.push(c.d + ' 日 ' + c.name + '（不在隊）');
-      else if (c.code && !SHIFT_CODES.includes(c.code)) bad.push(c.d + ' 日 ' + c.name + '：' + c.code + ' 不是 A／B／宿');
-      else if (cur && !SHIFT_CODES.includes(cur)) bad.push(c.d + ' 日 ' + c.name + '：原本是「' + cur + '」');
+      else if (c.code.length > 10) bad.push(c.d + ' 日 ' + c.name + '：太長');
     });
     if (bad.length) throw new Error('以下格子不能改：' + bad.join('、'));
     changes.forEach(c => sh.getRange(rowOf[c.d], mo.people[col[c.name]].col + 1).setValue(c.code || ''));
     delete cache_['m' + y + m];
-    log_(s.user, '修改 A／B／宿', name + '：' + changes.map(c => c.d + '日' + c.name + '→' + (c.code || '空白')).join('、'));
+    log_(s.user, '修改月班表', name + '：' + changes.map(c => c.d + '日' + c.name + '→' + (c.code || '空白')).join('、'));
     return { saved: changes.length };
   });
+}
+
+/**
+ * 同一年 1 月到 (m-1) 月，每個人各個固定排班的次數（給「已排次數」累計用；這個月由網頁自己算）。
+ * 回傳 {before: {姓名: {名稱: 次數}}}
+ */
+function getShiftCounts(token, y, m) {
+  need_(token);
+  const names = shiftNames_(), before = {};
+  for (let k = 1; k < m; k++) {
+    if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, k, '月班表'))) continue;
+    const mo = month_(y, k);
+    Object.keys(mo.days).forEach(d => mo.days[d].codes.forEach((c, i) => {
+      if (names.indexOf(c) < 0) return;
+      const who = before[mo.people[i].name] = before[mo.people[i].name] || {};
+      who[c] = (who[c] || 0) + 1;
+    }));
+  }
+  return { before };
 }
 
 // ---------- 車輛、救護訓練 ----------
