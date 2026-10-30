@@ -6,7 +6,7 @@
 <title>智能勤務表</title>
 <script>
 // 後台網址：Apps Script「部署 → 管理部署作業」裡的網頁應用程式網址（…/exec）
-const BACKEND = 'https://script.google.com/macros/s/請貼上部署網址/exec';
+const BACKEND = 'https://script.google.com/macros/s/AKfycbxS7UDhx-g_htN8E_PK8pMj9LjiKLFl3mhgtVnX7nN_GHcdTnwwMI0_HmbNCfahMM-4/exec';
 window.APP_URL = new URL('./', location.href).href;
 // 呼叫後台：api('login', '帳號', '密碼').then(...)；用 text/plain 送出，瀏覽器才不會擋（CORS）
 window.api = (fn, ...args) => fetch(BACKEND, {
