@@ -7,9 +7,14 @@
 // 留空就用系統帳號自己的預設日曆（測試用）。
 const CALENDAR_ID = '';
 
+// 網頁程式放在 GitHub Pages，每次打開都載入最新版；改功能只要在 GitHub 合併即可。
+const APP_URL = 'https://tpc1902239.github.io/duty-roster/app/';
+
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('智能勤務表（資料庫測試）')
+  const t = HtmlService.createTemplateFromFile('Index');
+  t.appUrl = APP_URL;
+  return t.evaluate()
+    .setTitle('智能勤務表')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
@@ -150,8 +155,9 @@ function calendarOn(date) {
   });
 }
 
-/** 測試頁一次取回：當月月班表、當天在隊／不在隊、當天日曆。 */
-function loadDay(date) {
+/** 讀取測試頁：當月月班表、當天在隊／不在隊、當天日曆。 */
+function loadDay(token, date) {
+  need_(token);
   const [y, m] = date.split('-').map(Number);
   return { date, month: monthRoster(y, m), here: peopleOn(date), away: awayOn(date), events: calendarOn(date) };
 }

@@ -2,69 +2,18 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<style>
-  :root { --bg:#f6f7f9; --card:#fff; --text:#1f2328; --muted:#656d76; --line:#d8dee4; --accent:#c0392b; --off:#eceff1; --warn:#fff4d6; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#16181c; --card:#1f2228; --text:#e6e8eb; --muted:#9aa3ad; --line:#353a42; --accent:#e06455; --off:#2a2e35; --warn:#4a3d16; }
-  }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, "Noto Sans TC", sans-serif; }
-  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:17px; margin:0 0 8px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; }
-  .muted { color:var(--muted); }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 16px; font-size:15px; cursor:pointer; }
-  input { font-size:15px; padding:6px; }
-  .scroll { overflow-x:auto; }
-  table { border-collapse:collapse; font-size:13px; }
-  th, td { border:1px solid var(--line); padding:2px 6px; text-align:center; white-space:nowrap; }
-  td.off { background:var(--off); color:var(--muted); }
-  tr.today td { font-weight:bold; }
-  .warn { background:var(--warn); }
-</style>
+<base target="_top">
+<?!= '<link rel="stylesheet" href="' + appUrl + 'app.css?v=' + Date.now() + '">' ?>
 </head>
 <body>
-<h1>智能勤務表：資料庫測試</h1>
-<div class="muted">確認試算表和日曆讀得到。這頁只讀資料，不會改任何東西。</div>
-
-<div class="card">
-  <input type="date" id="date"> <button id="go">讀取</button> <span id="msg" class="muted"></span>
-</div>
-<div id="out"></div>
-
+<div id="app"><p style="padding:16px;font:15px system-ui">載入中…</p></div>
 <script>
-const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
-$('date').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-
-$('go').onclick = () => {
-  $('msg').textContent = '讀取中…';
-  google.script.run
-    .withSuccessHandler(render)
-    .withFailureHandler(e => { $('msg').textContent = '錯誤：' + e.message; })
-    .loadDay($('date').value);
-};
-
-function render(d) {
-  $('msg').textContent = '';
-  const num = Object.fromEntries(d.month.people.map(p => [p.name, p.num]));
-  const ev = d.events.map(e => `<tr class="${e.unknown.length ? 'warn' : ''}">
-      <td>${esc(e.kind)}</td><td>${esc(e.duty)}</td>
-      <td>${e.start === null ? '' : esc(e.start + '–' + e.end)}</td>
-      <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
-      <td>${e.unknown.map(esc).join('、')}</td><td class="muted">${esc(e.title)}</td></tr>`).join('');
-  const head = d.month.people.map(p => `<th>${esc(p.num)}</th>`).join('');
-  const body = d.month.days.map(day => `<tr class="${day.date === d.date ? 'today' : ''}"><td>${esc(day.date.slice(8))}</td>` +
-    day.codes.map(c => c === null ? '<td class="off">—</td>' : `<td>${esc(c)}</td>`).join('') + '</tr>').join('');
-  $('out').innerHTML = `
-    <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
-      <div>${d.here.map(p => esc(p.num + '.' + p.name)).join('　')}</div>
-      ${d.away.length ? `<div class="muted">不在隊：${d.away.map(a => esc(a.num + '.' + a.name)).join('、')}</div>` : ''}
-    </div>
-    <div class="card"><h2>日曆</h2>
-      ${d.events.length ? `<div class="scroll"><table><tr><th>類型</th><th>勤務</th><th>時間</th><th>人員</th><th>對不到的人名</th><th>原標題</th></tr>${ev}</table></div>`
-                        : '<div class="muted">這天日曆沒有活動。</div>'}
-    </div>
-    <div class="card"><h2>月班表</h2><div class="scroll"><table><tr><th>日期</th>${head}</tr>${body}</table></div></div>`;
-}
+// 呼叫後台：api('login', '帳號', '密碼').then(...)
+window.api = (fn, ...args) => new Promise((resolve, reject) => {
+  google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args);
+});
+window.APP_URL = '<?!= appUrl ?>';
 </script>
+<?!= '<script src="' + appUrl + 'app.js?v=' + Date.now() + '" onerror="document.getElementById(\'app\').textContent=\'網頁程式載入失敗，請檢查網路後重新整理。\'"></script>' ?>
 </body>
 </html>
