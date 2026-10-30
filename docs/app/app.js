@@ -29,7 +29,7 @@
       const u = app.querySelector('#u').value.trim(), p = app.querySelector('#p').value;
       const req = setup ? api('setupAdmin', u, app.querySelector('#n').value.trim(), p) : api('login', u, p);
       app.querySelector('#e').textContent = '';
-      req.then(s => { me = s; store.set('me', JSON.stringify(s)); route('read'); })
+      req.then(s => { me = s; store.set('me', JSON.stringify(s)); route('month'); })
          .catch(e => { app.querySelector('#e').textContent = e.message; });
     };
     app.querySelector('#go').onclick = go;
@@ -45,6 +45,9 @@
   // ---------- 外框 ----------
 
   const PAGES = [
+    { id: 'month', name: '月班表', show: () => true },
+    { id: 'leave', name: '匯入假表', show: () => has('假表承辦') },
+    { id: 'tables', name: '車輛／救護訓練', show: () => has('車輛承辦') || has('救護訓練承辦') },
     { id: 'read', name: '讀取測試', show: () => true },
     { id: 'accounts', name: '帳號管理', show: isAdmin },
     { id: 'log', name: '操作紀錄', show: isAdmin },
@@ -56,7 +59,7 @@
       PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ month: pageMonth, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 讀取測試 ----------
@@ -80,17 +83,6 @@
         <td>${e.start == null ? '' : esc(e.start + '–' + e.end)}</td>
         <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
         <td>${e.unknown.map(esc).join('、')}</td><td class="l muted">${esc(e.title)}</td></tr>`).join('');
-    // 番號依十位數分組上色（個位數＝幹部、1x、2x、3x、4x…），同 4.2 版月班表
-    const grp = p => `g${Math.min(Math.floor(p.num / 10), 5)}`;
-    const WEEK = '日一二三四五六';
-    const weekday = date => WEEK[new Date(date + 'T00:00:00Z').getUTCDay()];
-    const nums = d.month.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
-    const names = d.month.people.map(p => `<th class="${grp(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('');
-    const body = d.month.days.map(day => {
-      const w = weekday(day.date);
-      return `<tr class="${day.date === d.date ? 'today' : ''}"><td>${Number(day.date.slice(8))}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` +
-        day.codes.map((c, i) => (c == null ? '<td class="off">—</td>' : `<td class="${grp(d.month.people[i])}">${esc(c)}</td>`)).join('') + '</tr>';
-    }).join('');
     const [yy, mm] = d.date.split('-').map(Number);
     return `
       <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
@@ -101,8 +93,264 @@
         ${d.events.length ? `<div class="scroll"><table><tr><th>類型</th><th>勤務</th><th>時間</th><th>人員</th><th>對不到的人名</th><th>原標題</th></tr>${ev}</table></div>`
                           : '<div class="muted">這天日曆沒有活動。</div>'}
       </div>
-      <div class="card"><h2>${yy} 年 ${mm} 月 月班表</h2><div class="scroll"><table class="roster">
-        <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div></div>`;
+      <div class="card">${rosterTable(yy, mm, d.month.people, d.month.days.map(day => ({
+        d: Number(day.date.slice(8)), codes: day.codes.map(c => c ?? ''), away: day.codes.map(c => c == null) })),
+        { today: Number(d.date.slice(8)) })}</div>`;
+  }
+
+  // ---------- 共用：月班表表格 ----------
+
+  const WEEK = '日一二三四五六';
+  const SHIFT = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', '宿'];
+  const has = role => me.roles.includes(role) || isAdmin();
+  // 番號依十位數分組上色（個位數＝幹部、1x、2x、3x、4x…），同 4.2 版月班表
+  const grp = p => `g${Math.min(Math.floor(p.num / 10), 5)}`;
+  const weekdayOf = (y, m, d) => WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  const ym = v => v.split('-').map(Number);
+  const nextMonth = () => { const t = new Date(Date.now() + 8 * 3600e3); t.setUTCDate(1); t.setUTCMonth(t.getUTCMonth() + 1); return t.toISOString().slice(0, 7); };
+
+  /**
+   * people:[{num,name}]、days:[{d, weekday, codes, away}]
+   * opts.today：粗體的日；opts.mark(d, i) 回傳格子額外的 class；opts.title
+   */
+  function rosterTable(y, m, people, days, opts = {}) {
+    const nums = people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
+    const names = people.map(p => `<th class="${grp(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('');
+    const body = days.map(day => {
+      const w = weekdayOf(y, m, day.d);
+      return `<tr class="${day.d === opts.today ? 'today' : ''}"><td>${day.d}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` +
+        day.codes.map((c, i) => (day.away[i]
+          ? `<td class="off" data-d="${day.d}" data-i="${i}">—</td>`
+          : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''}" data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') + '</tr>';
+    }).join('');
+    return `<h2>${opts.title || `${y} 年 ${m} 月 月班表`}</h2><div class="scroll"><table class="roster">
+      <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div>`;
+  }
+
+  // ---------- 月班表（檢視、改 A／B／宿） ----------
+
+  function pageMonth(main) {
+    const edit = has('排班');
+    main.innerHTML = `<h1>月班表</h1>
+      <div class="muted">${edit ? '點格子可以填 A／B／宿；有假別的格子不能改。改完按「儲存」。' : '只能檢視。'}</div>
+      <div class="card"><input type="month" id="mon"> <button id="go">讀取</button>
+        ${edit ? '<button id="save" disabled>儲存</button> <button class="plain" id="undo" disabled>放棄修改</button>' : ''}
+        <span id="msg" class="muted"></span></div>
+      <div class="card" id="out" hidden></div><div id="pick" class="picker" hidden></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    let data = null, pending = {};   // pending['d|姓名'] = code
+    const key = (d, i) => d + '|' + data.people[i].name;
+    const draw = () => {
+      const [y, m] = ym($('#mon').value);
+      const days = data.days.map(day => Object.assign({}, day, {
+        codes: day.codes.map((c, i) => (key(day.d, i) in pending ? pending[key(day.d, i)] : c)) }));
+      $('#out').innerHTML = rosterTable(y, m, data.people, days, {
+        mark: (d, i) => (key(d, i) in pending ? 'changed' : (edit && (!data.days[d - 1].codes[i] || SHIFT.includes(data.days[d - 1].codes[i])) ? 'editable' : '')),
+      });
+      const n = Object.keys(pending).length;
+      if (edit) { $('#save').disabled = $('#undo').disabled = !n; $('#save').textContent = n ? `儲存（${n} 格）` : '儲存'; }
+    };
+    const load = (done = '') => {
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '讀取中…'; pending = {};
+      call('getMonth', y, m).then(d => {
+        data = d;
+        if (!d.exists) { $('#out').hidden = true; $('#msg').textContent = `${y} 年 ${m} 月還沒有月班表，請先匯入假表。`; return; }
+        $('#msg').textContent = done; $('#out').hidden = false; draw();
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    $('#go').onclick = $('#mon').onchange = () => load();
+    if (edit) {
+      $('#out').onclick = ev => {
+        const td = ev.target.closest('td.editable, td.changed');
+        if (!td) return;
+        const d = Number(td.dataset.d), i = Number(td.dataset.i);
+        const pick = $('#pick'), r = td.getBoundingClientRect();
+        pick.innerHTML = `<div class="muted">${d} 日 ${esc(data.people[i].name)}</div>` +
+          SHIFT.map(c => `<button class="plain" data-c="${c}">${c}</button>`).join('') + '<button class="plain" data-c="">清除</button>';
+        pick.style.left = Math.min(r.left + scrollX, innerWidth - 220) + 'px';
+        pick.style.top = r.bottom + scrollY + 4 + 'px';
+        pick.hidden = false;
+        pick.onclick = e2 => {
+          const b = e2.target.closest('button'); if (!b) return;
+          const orig = data.days[d - 1].codes[i], k = key(d, i);
+          if (b.dataset.c === orig) delete pending[k]; else pending[k] = b.dataset.c;
+          pick.hidden = true; draw();
+        };
+      };
+      const close = e => {   // 換頁後這頁的元素就不在了，順便拿掉監聽
+        if (!main.isConnected) return document.removeEventListener('click', close);
+        if (!e.target.closest('#pick, td')) $('#pick').hidden = true;
+      };
+      document.addEventListener('click', close);
+      $('#undo').onclick = () => { pending = {}; draw(); };
+      $('#save').onclick = () => {
+        const [y, m] = ym($('#mon').value);
+        const changes = Object.entries(pending).map(([k, code]) => { const [d, name] = k.split('|'); return { d: Number(d), name, code }; });
+        $('#msg').textContent = '儲存中…';
+        call('saveShifts', y, m, changes, data.version)
+          .then(r => load(`已儲存 ${r.saved} 格。`))
+          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+      };
+    }
+    load();
+  }
+
+  // ---------- 讀 Excel ----------
+
+  const loadXLSX = () => (window.XLSX ? Promise.resolve() : new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = new URL('../vendor/xlsx.full.min.js', window.APP_URL).href;
+    s.onload = ok; s.onerror = () => no(new Error('Excel 讀取元件載入失敗，請重新整理'));
+    document.head.appendChild(s);
+  }));
+
+  const readBook = file => loadXLSX().then(() => file.arrayBuffer())
+    .then(buf => XLSX.read(buf, { type: 'array', bookFiles: true }));
+
+  const xml = (wb, path) => {
+    const f = wb.files && (wb.files[path] || wb.files['/' + path]);
+    if (!f) return null;
+    const text = typeof f.content === 'string' ? f.content : new TextDecoder().decode(f.content);
+    return new DOMParser().parseFromString(text, 'application/xml');
+  };
+  const byTag = (node, tag) => [...node.getElementsByTagName(tag)];
+
+  /** 找出某張工作表裡底色是黑色的格子（SheetJS 免費版不讀底色，所以直接讀 xlsx 裡的 XML）。 */
+  function blackCells(wb, sheetName) {
+    const out = new Set();
+    const book = xml(wb, 'xl/workbook.xml'), rels = xml(wb, 'xl/_rels/workbook.xml.rels'), styles = xml(wb, 'xl/styles.xml');
+    if (!book || !rels || !styles) return out;   // 舊版 .xls 讀不到底色
+    const sh = byTag(book, 'sheet').find(s => s.getAttribute('name') === sheetName);
+    const rid = sh && (sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'));
+    const rel = byTag(rels, 'Relationship').find(r => r.getAttribute('Id') === rid);
+    if (!rel) return out;
+    const target = rel.getAttribute('Target').replace(/^\/?xl\//, '').replace(/^\//, '');
+    const sheet = xml(wb, 'xl/' + target);
+    if (!sheet) return out;
+    const dark = c => {
+      if (!c) return false;
+      const rgb = c.getAttribute('rgb'), theme = c.getAttribute('theme'), idx = c.getAttribute('indexed');
+      const tint = Number(c.getAttribute('tint') || 0);
+      if (rgb) { const h = rgb.slice(-6); return [0, 2, 4].every(k => parseInt(h.substr(k, 2), 16) < 64); }
+      if (theme === '1') return tint < 0.3;      // 佈景主題「文字 1」= 黑
+      return idx === '8' || idx === '64';
+    };
+    const fills = byTag(byTag(styles, 'fills')[0] || styles, 'fill').map(f => {
+      const p = byTag(f, 'patternFill')[0];
+      return !!p && p.getAttribute('patternType') === 'solid' && dark(byTag(p, 'fgColor')[0]);
+    });
+    const xfs = byTag(byTag(styles, 'cellXfs')[0] || styles, 'xf').map(x => fills[Number(x.getAttribute('fillId') || 0)]);
+    byTag(sheet, 'c').forEach(c => { if (xfs[Number(c.getAttribute('s') || 0)]) out.add(c.getAttribute('r')); });
+    return out;
+  }
+
+  /** 從假表（4.2 版月班表格式）讀出 {people, days, sheet}。 */
+  function parseLeave(wb) {
+    const name = wb.SheetNames.find(n => /月班表|假表/.test(n)) || wb.SheetNames[0];
+    const ws = wb.Sheets[name];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    const isNum = v => v !== '' && !isNaN(Number(v)) && Number(v) > 0;
+    const head = rows.findIndex(r => r.slice(2).filter(isNum).length >= 5);
+    if (head < 0) throw new Error(`「${name}」找不到番號列（C 欄起一排數字）`);
+    const people = [];
+    for (let c = 2; c < rows[head].length && isNum(rows[head][c]); c++) {
+      people.push({ num: Number(rows[head][c]), name: String(rows[head + 1][c] || '').replace(/\s+/g, ''), c });
+    }
+    const black = blackCells(wb, name);
+    const days = [];
+    for (let r = head + 2; r < rows.length; r++) {
+      const d = Number(rows[r][0]);
+      if (!d || d > 31 || String(rows[r][1]).trim() === '') continue;
+      days.push({
+        d, weekday: String(rows[r][1]).trim(),
+        codes: people.map(p => String(rows[r][p.c] ?? '').trim()),
+        away: people.map(p => black.has(XLSX.utils.encode_cell({ r: r + range.s.r, c: p.c + range.s.c }))),
+      });
+    }
+    if (people.some(p => !p.name)) throw new Error('番號下一列要是姓名，有些番號沒有姓名');
+    return { sheet: name, people: people.map(({ num, name }) => ({ num, name })), days };
+  }
+
+  // ---------- 匯入假表 ----------
+
+  function pageLeave(main) {
+    main.innerHTML = `<h1>匯入假表</h1>
+      <div class="muted">上傳假表 Excel（格式同 4.2 版月班表：第 1 列番號、第 2 列姓名、A 欄日、B 欄星期）。黑色格子＝那天不在隊。<br>
+      這個月已經有月班表時，已填的 A／B／宿 在假表空白的格子會保留。</div>
+      <div class="card"><label>月份 <input type="month" id="mon"></label>
+        <input type="file" id="file" accept=".xlsx,.xlsm"> <span id="msg" class="muted"></span></div>
+      <div class="card" id="out" hidden></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = nextMonth();
+    let parsed = null;
+    $('#file').onchange = () => {
+      const f = $('#file').files[0]; if (!f) return;
+      $('#msg').textContent = '讀取中…'; $('#out').hidden = true;
+      readBook(f).then(wb => {
+        parsed = parseLeave(wb);
+        const [y, m] = ym($('#mon').value);
+        const want = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const blacks = parsed.days.reduce((n, d) => n + d.away.filter(Boolean).length, 0);
+        const warn = parsed.days.length !== want ? `<div class="err">注意：假表有 ${parsed.days.length} 天，但 ${m} 月有 ${want} 天，請確認月份。</div>` : '';
+        $('#msg').textContent = '';
+        $('#out').hidden = false;
+        $('#out').innerHTML = `<div>工作表「${esc(parsed.sheet)}」：${parsed.people.length} 人、${parsed.days.length} 天、黑色格子 ${blacks} 格。</div>${warn}
+          <p><button id="ok">確認匯入 ${y} 年 ${m} 月</button></p>` + rosterTable(y, m, parsed.people, parsed.days, { title: '預覽' });
+        $('#ok').onclick = () => {
+          $('#ok').disabled = true; $('#msg').textContent = '匯入中…';
+          call('getMonth', y, m)
+            .then(cur => call('importLeave', y, m, { people: parsed.people, days: parsed.days }, cur.version))
+            .then(r => { $('#msg').textContent = `已匯入 ${y} 年 ${m} 月，保留 A／B／宿 ${r.kept} 格。`; $('#out').hidden = true; })
+            .catch(e => { $('#msg').textContent = '錯誤：' + e.message; $('#ok').disabled = false; });
+        };
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+  }
+
+  // ---------- 車輛、救護訓練 ----------
+
+  function pageTables(main) {
+    const kinds = [['車輛', '車輛承辦'], ['救護訓練', '救護訓練承辦']].filter(([, r]) => has(r)).map(([k]) => k);
+    main.innerHTML = `<h1>車輛／救護訓練</h1>
+      <div class="muted">上傳 Excel（格式同 4.2 版的「車輛」「救護訓練」工作表），整張取代這個月的資料。</div>
+      <div class="card"><select id="kind">${kinds.map(k => `<option>${k}</option>`).join('')}</select>
+        <input type="month" id="mon"> <input type="file" id="file" accept=".xlsx,.xlsm"> <span id="msg" class="muted"></span></div>
+      <div class="card" id="out"></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    let cur = null;
+    const table = rows => rows.length ? `<div class="scroll"><table>${rows.map((r, i) =>
+      `<tr>${r.map(v => (i ? `<td class="l">${esc(v)}</td>` : `<th>${esc(v)}</th>`)).join('')}</tr>`).join('')}</table></div>` : '<div class="muted">沒有資料。</div>';
+    const load = () => {
+      const [y, m] = ym($('#mon').value);
+      $('#file').value = '';
+      call('getTable', y, m, $('#kind').value).then(t => {
+        cur = t;
+        $('#out').innerHTML = `<h2>目前的 ${y} 年 ${m} 月${esc($('#kind').value)}</h2>` + (t.exists ? table(t.rows) : '<div class="muted">還沒有資料。</div>');
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    $('#kind').onchange = $('#mon').onchange = load;
+    $('#file').onchange = () => {
+      const f = $('#file').files[0]; if (!f) return;
+      const kind = $('#kind').value, [y, m] = ym($('#mon').value);
+      readBook(f).then(wb => {
+        const name = wb.SheetNames.find(n => n.includes(kind)) || wb.SheetNames[0];
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' })
+          .map(r => r.map(v => String(v).trim())).filter(r => r.some(v => v));
+        $('#out').innerHTML = `<h2>預覽：工作表「${esc(name)}」，${Math.max(rows.length - 1, 0)} 列</h2>
+          <p><button id="ok">儲存為 ${y} 年 ${m} 月${esc(kind)}</button></p>` + table(rows);
+        $('#ok').onclick = () => {
+          $('#ok').disabled = true; $('#msg').textContent = '儲存中…';
+          call('saveTable', y, m, kind, rows, cur.version)
+            .then(() => { $('#msg').textContent = '已儲存。'; load(); })
+            .catch(e => { $('#msg').textContent = '錯誤：' + e.message; $('#ok').disabled = false; });
+        };
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    load();
   }
 
   // ---------- 帳號管理 ----------
@@ -166,6 +414,6 @@
   // ---------- 開始 ----------
 
   try { me = JSON.parse(store.get('me')); } catch (e) { me = null; }
-  if (me && me.token) route('read');
+  if (me && me.token) route('month');
   else api('needsSetup').then(loginForm).catch(e => { app.textContent = '錯誤：' + e.message; });
 })();
