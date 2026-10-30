@@ -1,10 +1,11 @@
 /**
  * 智能勤務表：資料庫與日曆的後台（Google Apps Script）。
- * 放在分隊 Google 帳號裡、綁定「勤務表資料庫」試算表。
+ * 放在勤務表專用的系統 Google 帳號裡、綁定「勤務表資料庫」試算表；分隊日曆以唯讀方式分享給它。
  */
 
-// 放勤務的日曆名稱；留空就用帳號的預設日曆。
-const CALENDAR_NAME = '';
+// 分隊日曆的 ID（日曆設定 →「整合日曆」→ 日曆 ID）。分隊帳號把日曆分享給系統帳號（查看所有活動詳細資料）。
+// 留空就用系統帳號自己的預設日曆（測試用）。
+const CALENDAR_ID = '';
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
@@ -108,9 +109,9 @@ function monthRoster(year, month) {
 // ---------- 讀日曆 ----------
 
 function calendar_() {
-  if (!CALENDAR_NAME) return CalendarApp.getDefaultCalendar();
-  const cal = CalendarApp.getCalendarsByName(CALENDAR_NAME)[0];
-  if (!cal) throw new Error('找不到日曆：' + CALENDAR_NAME);
+  if (!CALENDAR_ID) return CalendarApp.getDefaultCalendar();
+  const cal = CalendarApp.getCalendarById(CALENDAR_ID);
+  if (!cal) throw new Error('讀不到日曆，請確認分隊日曆已分享給這個帳號：' + CALENDAR_ID);
   return cal;
 }
 

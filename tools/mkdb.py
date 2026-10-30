@@ -1,4 +1,4 @@
-"""把 4.2 版 xlsm 轉成「勤務表資料庫」匯入用 xlsx（v2：每月一頁月班表、每月一頁存檔，格式同 4.2 版）。
+"""把 4.2 版 xlsm 轉成「勤務表資料庫」匯入用 xlsx（v2：每月一頁月班表、存檔、車輛、救護訓練，格式同 4.2 版）。
 
 用法：python3 mkdb.py 輸出.xlsx 9月.xlsm 10月.xlsm ...
 產出檔含同仁姓名，不要放進 repository。
@@ -69,6 +69,16 @@ for path in sys.argv[2:]:
     for r in range(1, a.max_row + 1):
         for c in range(1, 31):
             ws.cell(r, c).value = av.cell(r, c).value
+    # 車輛、救護訓練：照原樣（4.2 版格式）
+    for src_name in ('車輛', '救護訓練'):
+        src, sv = wb[src_name], vals[src_name]
+        ws = out.create_sheet(f'{tag} {src_name}')
+        copy_block(src, ws, range(1, src.max_row + 1), range(1, src.max_column + 1))
+        for r in range(1, src.max_row + 1):
+            for c in range(1, src.max_column + 1):
+                ws.cell(r, c).value = sv.cell(r, c).value
+        if src_name == '救護訓練' and not s(ws.cell(1, 5).value):
+            ws.cell(1, 5).value = '教官番號'
     months.append(tag)
 
 out.remove(out.active)
