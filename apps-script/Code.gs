@@ -3,9 +3,6 @@
  * 放在勤務表專用的系統 Google 帳號裡、綁定「勤務表資料庫」試算表；分隊日曆以唯讀方式分享給它。
  */
 
-// 分隊日曆的 ID（日曆設定 →「整合日曆」→ 日曆 ID）。分隊帳號把日曆分享給系統帳號（查看所有活動詳細資料）。
-// 留空就用系統帳號自己的預設日曆（測試用）。
-const CALENDAR_ID = '';
 
 // 網頁程式放在 GitHub Pages，每次打開都載入最新版；改功能只要在 GitHub 合併即可。
 const APP_URL = 'https://tpc1902239.github.io/duty-roster/app/';
@@ -113,11 +110,22 @@ function monthRoster(year, month) {
 
 // ---------- 讀日曆 ----------
 
+/** 設定分頁的值（項目 → 值）。 */
+function setting_(name) {
+  const r = rows_('設定').find(x => str_(x['項目']) === name);
+  return r ? str_(r['值']) : '';
+}
+
+/**
+ * 分隊日曆：ID 填在「設定」分頁的「日曆ID」（分隊帳號的日曆設定 →「整合日曆」→ 日曆 ID），
+ * 分隊帳號要先把日曆分享給系統帳號。沒填就用系統帳號自己的預設日曆（測試用）。
+ */
 function calendar_() {
-  if (!CALENDAR_ID) return CalendarApp.getDefaultCalendar();
+  const id = setting_('日曆ID');
+  if (!id) return CalendarApp.getDefaultCalendar();
   // 分享過來的日曆如果還沒加進清單，就幫它訂閱一次
-  const cal = CalendarApp.getCalendarById(CALENDAR_ID) || CalendarApp.subscribeToCalendar(CALENDAR_ID);
-  if (!cal) throw new Error('讀不到日曆，請確認分隊日曆已分享給這個帳號：' + CALENDAR_ID);
+  const cal = CalendarApp.getCalendarById(id) || CalendarApp.subscribeToCalendar(id);
+  if (!cal) throw new Error('讀不到日曆，請確認分隊日曆已分享給這個帳號：' + id);
   return cal;
 }
 

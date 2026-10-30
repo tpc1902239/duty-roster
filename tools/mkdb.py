@@ -1,11 +1,12 @@
 """把 4.2 版 xlsm 轉成「勤務表資料庫」匯入用 xlsx（v2：每月一頁月班表、存檔、車輛、救護訓練，格式同 4.2 版）。
 
-用法：python3 mkdb.py 輸出.xlsx 9月.xlsm 10月.xlsm ...
+用法：CALENDAR_ID=日曆ID python3 mkdb.py 輸出.xlsx 9月.xlsm 10月.xlsm ...
 產出檔含同仁姓名，不要放進 repository。
 """
-import sys, copy, warnings, openpyxl
+import os, sys, copy, warnings, openpyxl
 from openpyxl.styles import Font, PatternFill
 warnings.filterwarnings('ignore')
+CALENDAR_ID = os.environ.get('CALENDAR_ID', '')
 
 
 def s(v):
@@ -107,6 +108,7 @@ table('勤務類別', ['名稱', 'Z碼', 'AA碼', 'AB碼', '需輸入', '計入�
 table('設定', ['項目', '值', '說明'], [
     ('備勤最低人數', 3, 'C23 兩車三人'), ('駕訓時備勤減少', 2, 'C23 車輛與 2 人外出'),
     ('小隊長每日上限時數', 4, 'C22 值班、救護、共同勤務合計'), ('每人休息時數', 2, 'C14'),
-    ('連續服勤上限', 8, 'C03'), ('分隊長不排班', 'Y', 'C21')], 2)
+    ('連續服勤上限', 8, 'C03'), ('分隊長不排班', 'Y', 'C21'),
+    ('日曆ID', CALENDAR_ID, '分隊日曆的 ID（日曆設定 → 整合日曆）')], 2)
 out.save(sys.argv[1])
 print(len(people), 'people;', ', '.join(months))
