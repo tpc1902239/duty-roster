@@ -18,7 +18,7 @@ function doGet() {
 /** 網頁能呼叫的後台功能（其他函式一律不給呼叫）。放在函式裡，因為別的 .gs 檔載入順序不一定在前面。 */
 const api_ = () => ({
   needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, recentLog,
-  loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable,
+  loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable, getUnitStaff, saveUnitStaff, saveBase,
 });
 
 /**
@@ -108,11 +108,13 @@ function dayRoster_(date) {
   const mo = month_(y, m), day = mo.days[d];
   if (!day) throw new Error(date + ' 在月班表找不到這一天');
   const staff = staff_();
+  const unit = Object.fromEntries(unitStaff_().map(u => [u.name, u]));
   const here = [], away = [];
   mo.people.forEach((p, i) => {
     const info = staff[p.name] || { alias: [], role: '隊員', mode: '一般', status: '在隊' };
     const row = Object.assign({ num: p.num, name: p.name, code: day.codes[i] }, info);
-    (day.away[i] || info.status === '調離' ? away : here).push(row);
+    const out = info.status === '調離' || (unit[p.name] && unit[p.name].status === '不在隊');   // 編制人員設「不在隊」也算不在隊
+    (day.away[i] || out ? away : here).push(row);
   });
   return { weekday: day.weekday, here, away };
 }
