@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能勤務表</title>
+<script>
+// 後台網址：Apps Script「部署 → 管理部署作業」裡的網頁應用程式網址（…/exec）
+const BACKEND = 'https://script.google.com/macros/s/AKfycbxS7UDhx-g_htN8E_PK8pMj9LjiKLFl3mhgtVnX7nN_GHcdTnwwMI0_HmbNCfahMM-4/exec';
+window.APP_URL = new URL('./', location.href).href;
+// 呼叫後台：api('login', '帳號', '密碼').then(...)；用 text/plain 送出，瀏覽器才不會擋（CORS）
+window.api = (fn, ...args) => fetch(BACKEND, {
+  method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn, args }),
+}).then(r => r.json(), () => { throw new Error('連不到後台，請檢查網路後再試一次。'); })
+  .then(j => { if (j.error) throw new Error(j.error); return j.result; });
+document.write(`<link rel="stylesheet" href="app.css?v=${Date.now()}">`);
+</script>
+</head>
+<body>
+<div id="app"><p style="padding:16px;font:15px system-ui">載入中…</p></div>
+<script>
+const s = document.createElement('script');
+s.src = 'app.js?v=' + Date.now();
+s.onerror = () => { document.getElementById('app').textContent = '網頁程式載入失敗，請檢查網路後重新整理。'; };
+document.body.appendChild(s);
+</script>
+</body>
+</html>

@@ -15,6 +15,30 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+/** 網頁能呼叫的後台功能（其他函式一律不給呼叫）。放在函式裡，因為別的 .gs 檔載入順序不一定在前面。 */
+const api_ = () => ({
+  needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, recentLog,
+  loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable,
+});
+
+/**
+ * GitHub Pages 上的網頁（docs/app/index.html）用 POST 呼叫後台：body = {"fn": "函式名", "args": [...]}。
+ */
+function doPost(e) {
+  let out;
+  try {
+    const req = JSON.parse(e.postData.contents);
+    const fn = String(req.fn || '');
+    const api = api_();
+    if (!Object.prototype.hasOwnProperty.call(api, fn)) throw new Error('不明的功能：' + fn);
+    const r = api[fn].apply(null, req.args || []);
+    out = { result: r === undefined ? null : r };
+  } catch (err) {
+    out = { error: err.message || String(err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
 // ---------- 讀試算表 ----------
 // 分頁：人員、勤務類別、設定，以及每月一頁「YYYY-MM 月班表」「YYYY-MM 存檔」（格式同 4.2 版）。
 
@@ -79,7 +103,7 @@ function month_(year, month) {
 }
 
 /** 某一天的名單：在隊的人（含當天代號）與不在隊的人。 */
-function dayRoster(date) {
+function dayRoster_(date) {
   const [y, m, d] = date.split('-').map(Number);
   const mo = month_(y, m), day = mo.days[d];
   if (!day) throw new Error(date + ' 在月班表找不到這一天');
@@ -93,11 +117,11 @@ function dayRoster(date) {
   return { weekday: day.weekday, here, away };
 }
 
-function peopleOn(date) { return dayRoster(date).here; }
-function awayOn(date) { return dayRoster(date).away; }
+function peopleOn_(date) { return dayRoster_(date).here; }
+function awayOn_(date) { return dayRoster_(date).away; }
 
 /** 一個月的月班表，給測試頁顯示；不在隊的格子是 null。 */
-function monthRoster(year, month) {
+function monthRoster_(year, month) {
   const mo = month_(year, month);
   return {
     people: mo.people.map(p => ({ num: p.num, name: p.name })),
@@ -133,7 +157,7 @@ function calendar_() {
  * 解析標題「事項（起-迄）-人名、人名」。
  * 回傳 {title, duty, start, end, names, rest}；看不懂時間就回傳 start=null。
  */
-function parseTitle(title) {
+function parseTitle_(title) {
   const m = String(title).match(/^(.*?)[（(]\s*(\d{1,2})\s*[-~～－–]\s*(\d{1,2})\s*[）)](.*)$/);
   if (!m) return { title, duty: String(title).trim(), start: null, end: null, names: [], rest: false };
   const duty = m[1].trim();
@@ -142,13 +166,13 @@ function parseTitle(title) {
 }
 
 /** 某一天的日曆勤務，並把人名對應到人員。 */
-function calendarOn(date) {
-  const people = peopleOn(date);
+function calendarOn_(date) {
+  const people = peopleOn_(date);
   const find = name => people.find(p => p.name === name || p.alias.includes(name) || String(p.num) === name);
   const start = new Date(date + 'T00:00:00+08:00');
   const end = new Date(start.getTime() + 24 * 3600 * 1000);
   return calendar_().getEvents(start, end).map(ev => {
-    const t = parseTitle(ev.getTitle());
+    const t = parseTitle_(ev.getTitle());
     // 「小華休息時間（18-20）」這種人名寫在前面的舊寫法
     if (t.rest && !t.names.length) {
       const p = people.find(p => [p.name, ...p.alias].some(n => n && t.duty.includes(n)));
@@ -168,5 +192,5 @@ function calendarOn(date) {
 function loadDay(token, date) {
   need_(token);
   const [y, m] = date.split('-').map(Number);
-  return { date, month: monthRoster(y, m), here: peopleOn(date), away: awayOn(date), events: calendarOn(date) };
+  return { date, month: monthRoster_(y, m), here: peopleOn_(date), away: awayOn_(date), events: calendarOn_(date) };
 }
