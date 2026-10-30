@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能勤務表</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5d6676; --line: #dde1e8;
+    --accent: #c0392b; --accent-text: #fff; --fill: #fff2c6; --fixed: #fff; --err: #b3261e; --warn: #8a5a00; --ok: #1e7b34;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181e; --card: #1e232b; --text: #e8ebf0; --muted: #9aa3b2; --line: #333a45;
+      --accent: #e0574a; --accent-text: #fff; --fill: #4a3f17; --fixed: #1e232b; --err: #ff8a80; --warn: #ffcc66; --ok: #7bd88f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 4px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  button, .file { font: inherit; border-radius: 8px; padding: 8px 16px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=file] { max-width: 100%; }
+  .meta span { margin-right: 12px; }
+  .muted { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 13px; min-width: 900px; }
+  th, td { border: 1px solid var(--line); padding: 3px 4px; text-align: center; min-width: 30px; }
+  th:first-child, td:first-child { text-align: left; white-space: nowrap; min-width: 56px; }
+  td.new { background: var(--fill); font-weight: 600; }
+  td.ext { color: var(--muted); }
+  tr.sep td { border-top: 2px solid var(--muted); }
+  ul.msgs { margin: 0; padding-left: 20px; }
+  .err { color: var(--err); } .warn { color: var(--warn); } .ok { color: var(--ok); }
+  .legend { display: inline-block; width: 14px; height: 14px; background: var(--fill); border: 1px solid var(--line); vertical-align: -2px; }
+  ol { padding-left: 20px; margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>智能勤務表</h1>
+  <p class="sub">選擇勤務表 xlsm 檔 → 一鍵補空缺 → 複製貼回 Excel。檔案只在這台電腦上計算，不會上傳。</p>
+
+  <section class="card">
+    <h2>1. 選擇勤務表檔案</h2>
+    <div class="row">
+      <input type="file" id="file" accept=".xlsm,.xlsx">
+      <span id="loadMsg" class="muted">請先在 Excel 按「編排勤務日期」帶入當天資料、預排好外勤並存檔，再選擇檔案。</span>
+    </div>
+    <div id="meta" class="meta" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. 排班</h2>
+    <div class="row">
+      <button id="solve" class="primary" disabled>一鍵補空缺</button>
+      <button id="check" disabled>只檢查目前排班</button>
+      <button id="copy" disabled>複製結果（貼到排班區 B3）</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <h2>3. 結果 <span class="muted" style="font-weight:normal;font-size:13px"><span class="legend"></span> 程式補上的格子</span></h2>
+    <div class="scroll"><table id="table"></table></div>
+    <h2 style="margin-top:16px">檢查結果</h2>
+    <ul class="msgs" id="msgs"></ul>
+    <details style="margin-top:12px">
+      <summary>怎麼貼回 Excel？</summary>
+      <ol>
+        <li>按上面的「複製結果」。</li>
+        <li>回到 Excel 的「排班區」，點選 B3 儲存格。</li>
+        <li>按 Ctrl+V 貼上（會蓋掉 B3:Y11 的值班、救護、休息）。</li>
+        <li>按「檢查排班狀況」再確認一次，然後照平常流程輸出勤務表。</li>
+      </ol>
+    </details>
+  </section>
+</main>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

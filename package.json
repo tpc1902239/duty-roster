@@ -1,0 +1,12 @@
+{
+  "name": "duyty-roster",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "backtest": "node tools/backtest.mjs"
+  },
+  "devDependencies": {
+    "highs": "1.15.4",
+    "xlsx": "0.18.5"
+  }
+}
