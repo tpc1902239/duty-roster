@@ -115,7 +115,8 @@ function monthRoster(year, month) {
 
 function calendar_() {
   if (!CALENDAR_ID) return CalendarApp.getDefaultCalendar();
-  const cal = CalendarApp.getCalendarById(CALENDAR_ID);
+  // 分享過來的日曆如果還沒加進清單，就幫它訂閱一次
+  const cal = CalendarApp.getCalendarById(CALENDAR_ID) || CalendarApp.subscribeToCalendar(CALENDAR_ID);
   if (!cal) throw new Error('讀不到日曆，請確認分隊日曆已分享給這個帳號：' + CALENDAR_ID);
   return cal;
 }
