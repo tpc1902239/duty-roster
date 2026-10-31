@@ -114,6 +114,9 @@
    * people:[{num,name}]、days:[{d, weekday, codes, away}]
    * opts.today：粗體的日；opts.mark(d, i) 回傳格子額外的 class；opts.title
    */
+  // 固定欄寬，讓月班表和已排次數上下對齊：前兩欄（日、星期／標題）＋每人一欄
+  const cols = n => `<colgroup><col style="width:26px"><col style="width:30px">${'<col style="width:30px">'.repeat(n)}</colgroup>`;
+
   function rosterTable(y, m, people, days, opts = {}) {
     const nums = people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
     const names = people.map(p => `<th class="${grp(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('');
@@ -122,16 +125,17 @@
       return `<tr class="${day.d === opts.today ? 'today' : ''}"><td>${day.d}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` +
         day.codes.map((c, i) => (day.away[i]
           ? `<td class="off" data-d="${day.d}" data-i="${i}">—</td>`
-          : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''}" data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') + '</tr>';
+          : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''} ${opts.shift && opts.shift(c) ? 'shift' : ''}" data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') + '</tr>';
     }).join('');
-    return `<h2>${opts.title || `${y}年${m}月班表`}</h2><div class="scroll${opts.grid ? ' gridwrap' : ''}"><table class="roster${opts.grid ? ' grid' : ''}">
+    return `<h2>${opts.title || `${y}年${m}月班表`}</h2><div class="scroll${opts.grid ? ' gridwrap' : ''}"><table class="roster${opts.grid ? ' grid' : ''}">${opts.grid ? cols(people.length) : ''}
       <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div>`;
   }
 
   // ---------- 月班表（檢視、填固定排班） ----------
 
-  // 「已排次數」分組：名稱去掉尾巴的數字（A1、A2 → A；B1 → B；宿 → 宿），同 4.2 版月班表下方
-  const group = name => name.replace(/\d+$/, '') || name;
+  // 「已排次數」分組：名稱去掉尾巴的數字（A1、A2 → A；B1 → B），有「宿」的都算宿，同 4.2 版月班表下方
+  const group = name => (/宿/.test(name) ? '宿' : (name.replace(/\d+$/, '') || name));
+  const GROUP_ORDER = ['宿', 'A', 'B'];
 
   function pageMonth(main) {
     const edit = has('排班');
@@ -169,13 +173,15 @@
       const c = td(d, i);
       c.textContent = code;
       c.classList.toggle('changed', key(d, i) in pending);
+      c.classList.toggle('shift', names().includes(code));
       return true;
     };
     const draw = () => {
       const [y, m] = ym($('#mon').value);
       const wrap = $('#out .scroll'), left = wrap ? wrap.scrollLeft : 0, top = wrap ? wrap.scrollTop : 0;
       const days = data.days.map(day => Object.assign({}, day, { codes: day.codes.map((c, i) => codeAt(day.d, i)) }));
-      $('#out').innerHTML = rosterTable(y, m, data.people, days, { grid: true, mark: (d, i) => (key(d, i) in pending ? 'changed' : '') });
+      $('#out').innerHTML = rosterTable(y, m, data.people, days, {
+        grid: true, mark: (d, i) => (key(d, i) in pending ? 'changed' : ''), shift: c => names().includes(c) });
       const w = $('#out .scroll');
       w.tabIndex = 0; w.scrollLeft = left; w.scrollTop = top;
       paintSel(); refreshButtons();
@@ -206,7 +212,7 @@
       const done = (save, move) => {
         if (!editing) return;
         editing = null;
-        if (save) setCell(d, i, inp.value); else c.textContent = codeAt(d, i);
+        if (!save || !setCell(d, i, inp.value)) c.textContent = codeAt(d, i);
         if (save) refreshButtons();
         if (move) { sel = { d0: Math.min(d + 1, nDays()), i0: i, d1: Math.min(d + 1, nDays()), i1: i }; }
         paintSel(); $('#out .scroll').focus({ preventScroll: true });
@@ -314,7 +320,7 @@
 
     // ---- 已排次數：當月（含還沒儲存的修改）＋全年累計，欄位跟月班表一樣 ----
     const drawStats = () => {
-      const groups = [...new Set(names().map(group).concat(['宿', 'A', 'B']))];
+      const groups = [...new Set(GROUP_ORDER.concat(names().map(group)))];
       const now = data.people.map(() => ({}));
       data.days.forEach(day => data.people.forEach((p, i) => {
         const c = codeAt(day.d, i);
@@ -325,15 +331,15 @@
         Object.entries(before[p.name] || {}).forEach(([c, n]) => { t[group(c)] = (t[group(c)] || 0) + n; });
         return t;
       });
-      const rows = (label, arr) => groups.map((g, k) => `<tr>${k ? '' : `<th rowspan="${groups.length}" class="lbl">${label}</th>`}<th>${esc(g)}</th>` +
+      const rows = (label, arr, cls) => groups.map((g, k) => `<tr class="${k ? '' : cls}">${k ? '' : `<th rowspan="${groups.length}" class="lbl">${label}</th>`}<th>${esc(g)}</th>` +
         data.people.map((p, i) => `<td class="${grp(p)}">${arr[i][g] || ''}</td>`).join('') + '</tr>').join('');
       const [y] = ym($('#mon').value);
       const wrap = $('#stats .scroll'), left = wrap ? wrap.scrollLeft : 0;
       $('#stats').innerHTML = `<h2>已排次數</h2>
-        <div class="muted">全年累計${baseMonth ? `＝累計基準（${y}年1～${baseMonth}月）＋之後各月` : `＝${y}年1月起`}，含這個月還沒儲存的修改。</div>
-        <div class="scroll"><table class="roster grid">
+        <div class="muted">全年累計${baseMonth ? `：以累計基準（${y}年1～${baseMonth}月，4.2 版匯入）為準，加減之後或之前各月` : `：${y}年1月起（還沒匯入累計基準）`}，含這個月還沒儲存的修改。</div>
+        <div class="scroll"><table class="roster grid stats">${cols(data.people.length)}
         <tr><th colspan="2" class="lbl"></th>${data.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('')}</tr>
-        ${rows('當月', now)}${rows('全年<br>累計', total)}</table></div>` +
+        ${rows('當月', now, 'top')}${rows('全年<br>累計', total, 'top')}</table></div>` +
         (edit ? `<p class="muted">匯入累計基準：上傳 4.2 版的月班表檔（例如 10 月），讀它的「累計」宿／A／B 列。
           <label>截至 <input type="number" id="bm" min="1" max="12" value="10" style="width:60px"> 月</label>
           <input type="file" id="bf" accept=".xlsm,.xlsx"></p>` : '');
