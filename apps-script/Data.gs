@@ -267,22 +267,30 @@ function saveShifts(token, y, m, changes, version) {
 function getShiftCounts(token, y, m) {
   need_(token);
   const names = shiftNames_(), before = {};
-  const base = base_(y);
-  let from = 1;
-  if (base && base.month < m) {
-    from = base.month + 1;
-    Object.keys(base.counts).forEach(n => { before[n] = Object.assign({}, base.counts[n]); });
-  }
-  for (let k = from; k < m; k++) {
-    if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, k, '月班表'))) continue;
+  const add = (k, sign) => {   // 第 k 月每個人各個固定排班的次數加進（或扣出）before
+    if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, k, '月班表'))) return;
     const mo = month_(y, k);
     Object.keys(mo.days).forEach(d => mo.days[d].codes.forEach((c, i) => {
       if (names.indexOf(c) < 0) return;
+      const key = sign > 0 ? c : group_(c);   // 基準只有分組，扣的時候用分組
       const who = before[mo.people[i].name] = before[mo.people[i].name] || {};
-      who[c] = (who[c] || 0) + 1;
+      who[key] = (who[key] || 0) + sign;
     }));
+  };
+  const base = base_(y);
+  if (!base) {
+    for (let k = 1; k < m; k++) add(k, 1);
+  } else {
+    Object.keys(base.counts).forEach(n => { before[n] = Object.assign({}, base.counts[n]); });
+    if (base.month < m) for (let k = base.month + 1; k < m; k++) add(k, 1);
+    else for (let k = m; k <= base.month; k++) add(k, -1);   // 看的是基準以前的月份：從基準扣回去
   }
-  return { before, baseMonth: base && base.month < m ? base.month : 0 };
+  return { before, baseMonth: base ? base.month : 0 };
+}
+
+/** 固定排班名稱的分組：去掉尾巴數字（A1→A、B2→B），名稱有「宿」的都算宿。 */
+function group_(name) {
+  return /宿/.test(name) ? '宿' : (name.replace(/\d+$/, '') || name);
 }
 
 // ---------- 車輛、救護訓練 ----------
