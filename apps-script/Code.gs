@@ -161,7 +161,10 @@ function calendar_() {
  * 回傳 {title, duty, start, end, names, rest}；看不懂時間就回傳 start=null。
  */
 function parseTitle_(title) {
-  const m = String(title).match(/^(.*?)[（(]\s*(\d{1,2})\s*[-~～－–]\s*(\d{1,2})\s*[）)](.*)$/);
+  // 時間可以寫 18-22、0800-1200、08:00-12:00、8-12時；括號可有可無
+  const T = '(\\d{1,2})(?::?\\d{2})?\\s*[-~～－–]\\s*(\\d{1,2})(?::?\\d{2})?\\s*時?';
+  const m = String(title).match(new RegExp('^(.*?)[（(]\\s*' + T + '\\s*[）)](.*)$')) ||
+            String(title).match(new RegExp('^(.*?)\\s+' + T + '(.*)$'));
   if (!m) return { title, duty: String(title).trim(), start: null, end: null, names: [], rest: false };
   const duty = m[1].trim();
   const names = m[4].replace(/^[\s\-－–]+/, '').split(/[、,，\s]+/).filter(Boolean);
@@ -176,6 +179,17 @@ function calendarOn_(date) {
   const end = new Date(start.getTime() + 24 * 3600 * 1000);
   return calendar_().getEvents(start, end).map(ev => {
     const t = parseTitle_(ev.getTitle());
+    // 標題沒寫時間的，用日曆上這個事項的起訖時間（「事項-人名」）
+    if (t.start === null && !ev.isAllDayEvent()) {
+      const st = ev.getStartTime(), en = ev.getEndTime();
+      const H = d => Number(Utilities.formatDate(d, 'Asia/Taipei', 'H')), M = d => Number(Utilities.formatDate(d, 'Asia/Taipei', 'm'));
+      const parts = String(ev.getTitle()).split(/[-－–]/);
+      t.duty = parts[0].trim();
+      t.names = parts.slice(1).join('-').split(/[、,，\s]+/).filter(Boolean);
+      t.start = H(st);
+      t.end = en - st >= 86400000 ? 8 : (H(en) + (M(en) ? 1 : 0)) % 24;
+      t.rest = /休息/.test(t.duty);
+    }
     // 「小華休息時間（18-20）」這種人名寫在前面的舊寫法
     if (t.rest && !t.names.length) {
       const p = people.find(p => [p.name, ...p.alias].some(n => n && t.duty.includes(n)));

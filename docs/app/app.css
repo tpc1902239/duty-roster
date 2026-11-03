@@ -65,7 +65,8 @@ table.grid th.lbl { position:sticky; left:0; z-index:1; background:var(--card); 
 table.grid.day th.lbl { text-align:left; padding:1px 4px; font-weight:600; }
 table.grid.day th.rl { cursor:text; }
 table.grid.day td { font-size:12px; letter-spacing:0; }
-table.grid.day tr.sb td { font-weight:700; background:var(--ok); cursor:pointer; }
+table.grid.day tr.sb td { background:var(--ok); vertical-align:top; height:auto; font-size:11px; line-height:1.15; padding:2px 0; }
+table.grid.day tr.sb td .n { margin-top:2px; border-top:1px solid #8c959f; font-weight:700; }
 table.grid.day tr.sb td.low { background:#d0021b; color:#fff; }
 table.grid.day tr.first > * { border-top:2px solid #57606a; }
 table.grid.day tr.t-值班 th.lbl { background:#bfe3f5; } table.grid.day tr.t-一救 th.lbl { background:#fff2a8; }
@@ -88,9 +89,17 @@ table.grid.day button.x { padding:0 4px; font-size:11px; background:transparent;
 .dayside textarea { width:100%; font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
 .dayside .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px; }
 #who { display:flex; flex-wrap:wrap; gap:2px 10px; margin:4px 0 8px; font-size:13px; }
-#who label.busy { color:var(--muted); }
+#who label.busy, .busytag { background:#ffb74d; color:#1f2328; border-radius:4px; padding:0 3px; }
+#who .sep { flex-basis:100%; margin-top:6px; font-weight:600; color:var(--muted); }
+#who small { color:var(--muted); margin-left:2px; }
 table.hours tr[data-num] { cursor:pointer; } table.hours tr.on td { background:#1e6ee6; color:#fff; }
 table.hours tr.night td { background:#fff59d; color:#1f2328; }
 table.cal td { vertical-align:top; }
 ul.chk { margin:6px 0 0; padding-left:18px; } ul.chk li.e b { color:#d0021b; } ul.chk li.w b { color:#9a6700; }
 .ok { color:#1a7f37; font-weight:600; }
+table.grid.day td.offp { color:#8250df; font-style:italic; }
+.dayrow { display:flex; flex-wrap:wrap; gap:0 12px; align-items:flex-start; }
+.dayrow .daygrid { flex:0 1 auto; min-width:0; max-width:100%; }
+.dayrow #hrs { flex:1 1 300px; max-width:460px; position:sticky; top:70px; max-height:calc(100vh - 80px); overflow:auto; }
+table.hours th, table.hours td { padding:1px 6px; }
+.warnt { color:#9a6700; }
