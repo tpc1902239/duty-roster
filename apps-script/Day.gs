@@ -159,11 +159,11 @@ function nightList_(out, prev) {
 
 // ---------- 存檔 ----------
 // 「YYYY-MM 存檔」分頁，每天一塊（同 4.2 版存檔區）：
-//   第 1 列：A 日、B–Y 08…07、Z 起是欄名（類型、勤務表列、文字欄、大隊代碼、勤務類別、項目）
+//   第 1 列：A 日、B–Y 08…07、Z 起是欄名（類型、勤務表列、文字欄、大隊代碼、勤務類別、項目、行事曆）
 //   接著每一列是排班區的一列：A 列名、B–Y 番號、Z 起是這列的屬性
 //   最後兩列：「在隊」（B 欄＝番號=姓名=班別、…，留下當天番號對姓名的對照）、「備註」（B 欄）
 
-const SAVE_HEAD = ['類型', '勤務表列', '文字欄', '大隊代碼', '勤務類別', '項目'];
+const SAVE_HEAD = ['類型', '勤務表列', '文字欄', '大隊代碼', '勤務類別', '項目', '行事曆'];
 const SAVE_W = 1 + HOURS.length + SAVE_HEAD.length;
 
 /** 讀整張存檔分頁，切成 {日: [列, …]}。 */
@@ -193,7 +193,7 @@ function readDay_(y, m, d) {
       out.savedBy = r[1]; out.savedAt = r[2];
     } else if (r[0] !== '') {
       const a = r.slice(1 + HOURS.length);
-      const row = { label: r[0], cells: r.slice(1, 1 + HOURS.length), type: a[0], place: a[1], text: a[2], code: a[3], category: a[4], item: a[5] };
+      const row = { label: r[0], cells: r.slice(1, 1 + HOURS.length), type: a[0], place: a[1], text: a[2], code: a[3], category: a[4], item: a[5], ev: a[6] };
       out.rows.push(row.type && SAVE_TYPES.indexOf(row.type) >= 0 ? row : legacyRow_(row, a));
     }
   });
@@ -229,7 +229,7 @@ function saveDay(token, date, day, version) {
     const rows = [pad([String(d)].concat(HOURS, SAVE_HEAD))];
     day.rows.forEach(r => rows.push(pad([str_(r.label)].concat(
       HOURS.map((h, i) => str_(r.cells[i])),
-      [r.type, r.place, r.text, r.code, r.category, r.item].map(str_)))));
+      [r.type, r.place, r.text, r.code, r.category, r.item, r.ev].map(str_)))));
     rows.push(pad(['在隊', day.people.map(p => [p.num, p.name, p.code].map(str_).join('=')).join('、')]));
     rows.push(pad(['備註', str_(day.memo)]));
     rows.push(pad(['存檔', s.name || s.user, Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm')]));
