@@ -19,7 +19,7 @@ function doGet() {
 const api_ = () => ({
   needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, recentLog,
   loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable, getUnitStaff, saveUnitStaff, saveBase,
-  getItems, saveItems, getDay, saveDay,
+  getItems, saveItems, getDay, saveDay, getColors, saveColors,
 });
 
 /**
@@ -200,7 +200,8 @@ function calendarOn_(date) {
       allDay: ev.isAllDayEvent(),
       people: matched.filter(x => x.person).map(x => x.person.name),
       unknown: matched.filter(x => !x.person).map(x => x.name),
-      kind: ev.isAllDayEvent() || t.start === null ? '備註' : t.rest ? '休息' : t.names.length ? '指定人' : '待排',
+      // 全天事項標題有寫時間（例如「TP複訓(08-18)-于萱」）也照標題的時間排
+      kind: t.start === null ? '備註' : t.rest ? '休息' : t.names.length ? '指定人' : '待排',
     });
   });
 }

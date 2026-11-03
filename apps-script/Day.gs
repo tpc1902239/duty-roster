@@ -106,7 +106,7 @@ function getDay(token, date) {
     date, weekday: roster.weekday, people,
     off: off.map(p => ({ num: p.num, name: p.name, code: p.code })),
     away: roster.away.map(p => ({ num: p.num, name: p.name })),
-    defs: shiftDefs_(), items: items_(), events, calendarError,
+    defs: shiftDefs_(), items: items_(), colors: colors_(), events, calendarError,
     night: lastNight_(date),
     saved, version: version_(sheetName_(y, m, '存檔')),
     settings: {
@@ -243,5 +243,44 @@ function saveDay(token, date, day, version) {
     all.forEach((r, i) => { if (r[1] === '08' && /^\d+$/.test(r[0])) sh.getRange(i + 1, 1, 1, SAVE_W).setFontWeight('bold').setBackground('#ddebf7'); });
     log_(s.user, existed ? '異動勤務表' : '存檔勤務表', date + '：' + day.rows.length + ' 列');
     return { existed };
+  });
+}
+
+// ---------- 排班區顏色 ----------
+// 「排班區顏色」分頁：項目、底色。項目是「列:值班」這種（列名那格的顏色）或「班:A1」這種（固定班在自己時段的格子顏色）。
+
+const COLOR_DEFAULTS = {
+  '列:時間': '', '列:備勤人員': '#92d050', '列:值班': '#00b0f0', '列:一救': '#ffff00', '列:二救': '#f4b183', '列:休息': '#f8cbad', '列:外勤': '',
+  '班:宿': '#00b0f0', '班:A1': '#ffff00', '班:A2': '#ffc000', '班:B1': '#dae3f3', '班:B2': '#c6e0b4',
+};
+
+function colors_() {
+  if (!SpreadsheetApp.getActive().getSheetByName('排班區顏色')) return Object.assign({}, COLOR_DEFAULTS);
+  const out = {};
+  rows_('排班區顏色').forEach(r => { const k = str_(r['項目']); if (k) out[k] = str_(r['底色']); });
+  return out;
+}
+
+function getColors(token) {
+  need_(token);
+  return { colors: colors_(), version: version_('排班區顏色'), defs: shiftDefs_().map(d => d.name) };
+}
+
+function saveColors(token, colors, version) {
+  const s = need_(token, '排班');
+  Object.keys(colors).forEach(k => {
+    if (!/^(列|班):/.test(k)) throw new Error('不明的項目：' + k);
+    if (colors[k] && !/^#[0-9a-f]{6}$/i.test(colors[k])) throw new Error(k + '：顏色格式不對');
+  });
+  return guarded_('排班區顏色', version, () => {
+    const ss = SpreadsheetApp.getActive();
+    const sh = ss.getSheetByName('排班區顏色') || ss.insertSheet('排班區顏色');
+    const values = [['項目', '底色']].concat(Object.keys(colors).map(k => [k, colors[k] || '']));
+    sh.clear();
+    sh.getRange(1, 1, values.length, 2).setNumberFormat('@').setValues(values);
+    sh.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#ddebf7');
+    delete cache_['排班區顏色'];
+    log_(s.user, '排班區顏色', Object.keys(colors).length + ' 項');
+    return { count: Object.keys(colors).length };
   });
 }
