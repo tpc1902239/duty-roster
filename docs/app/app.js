@@ -49,6 +49,7 @@
     { id: 'month', name: '月班表', show: () => true },
     { id: 'shiftdefs', name: '固定排班設定', show: () => true },
     { id: 'items', name: '外勤項目設定', show: () => true },
+    { id: 'colors', name: '排班區顏色', show: () => true },
     { id: 'staff', name: '編制人員', show: () => true },
     { id: 'leave', name: '匯入假表', show: () => has('假表承辦') },
     { id: 'tables', name: '車輛／救護訓練', show: () => has('車輛承辦') || has('救護訓練承辦') },
@@ -63,7 +64,7 @@
       PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, items: pageItems, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ day: pageDay, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 讀取測試 ----------
@@ -579,6 +580,50 @@
     load();
   }
 
+  // ---------- 排班區顏色 ----------
+
+  function pageColors(main) {
+    const edit = has('排班');
+    main.innerHTML = `<h1>排班區顏色</h1>
+      <div class="muted"><b>列的顏色</b>：排班區最左邊列名那一格的底色。<b>固定班的顏色</b>：A1、B1、宿…這些人在自己班的時段、自己那一列的格子底色（同 4.2 版，一眼看得出是誰的班）。不想上色就勾「不上色」。</div>
+      <div class="card"><div id="list"></div>
+        ${edit ? '<p><button id="save">儲存</button> <span id="msg" class="muted"></span></p>' : ''}</div>`;
+    const $ = s => main.querySelector(s);
+    const ROWS = ['時間', '備勤人員', '值班', '一救', '二救', '休息', '外勤'];
+    let colors = {}, version = 0, defs = [];
+    const line = (key, name) => {
+      const c = colors[key] || '';
+      return `<tr data-k="${esc(key)}"><td class="l">${esc(name)}</td>
+        <td><input type="color" value="${esc(c || '#ffffff')}" ${edit ? '' : 'disabled'} ${c ? '' : 'class="dim"'}></td>
+        <td><label><input type="checkbox" class="none" ${c ? '' : 'checked'} ${edit ? '' : 'disabled'}> 不上色</label></td>
+        <td><span class="swatch" style="${c ? `background:${esc(c)}` : ''}">16</span></td></tr>`;
+    };
+    const draw = () => {
+      $('#list').innerHTML = `<h2>列的顏色</h2><table class="defs colors">${ROWS.map(r => line('列:' + r, r)).join('')}</table>
+        <h2 style="margin-top:12px">固定班的顏色</h2>` + (defs.length ? `<table class="defs colors">${defs.map(d => line('班:' + d, d)).join('')}</table>` : '<div class="muted">還沒有固定排班設定。</div>');
+    };
+    $('#list').addEventListener('input', e => {
+      const tr = e.target.closest('tr[data-k]'); if (!tr) return;
+      const col = tr.querySelector('input[type=color]'), none = tr.querySelector('.none');
+      if (e.target === col) none.checked = false;
+      colors[tr.dataset.k] = none.checked ? '' : col.value;
+      col.classList.toggle('dim', none.checked);
+      tr.querySelector('.swatch').style.background = colors[tr.dataset.k] || '';
+    });
+    const load = (done = '') => call('getColors').then(r => {
+      colors = r.colors; version = r.version; defs = r.defs; draw();
+      if ($('#msg')) $('#msg').textContent = done || (version ? '' : '目前是預設顏色（照 4.2 版），按「儲存」後才會存進資料庫。');
+    });
+    if (edit) $('#save').onclick = () => {
+      const out = {};
+      ROWS.forEach(r => { out['列:' + r] = colors['列:' + r] || ''; });
+      defs.forEach(d => { out['班:' + d] = colors['班:' + d] || ''; });
+      $('#msg').textContent = '儲存中…';
+      call('saveColors', out, version).then(r => load(`已儲存 ${r.count} 項。`)).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    load();
+  }
+
   // ---------- 排班區（輸入） ----------
 
   const FIXED_TYPES = ['值班', '一救', '二救', '休息'];
@@ -597,7 +642,7 @@
       <div id="body" hidden>
         <div class="dayrow">
           <div class="card daygrid"><div id="info" class="muted"></div><div class="gridwrap" id="gw" tabindex="0"></div>
-            ${edit ? '<p class="tools"><button class="plain" id="add2">＋ 二救列</button> <button class="plain" id="addR">＋ 休息列</button> <span class="muted">外勤列、多加的列可以按右邊 ✕ 刪除；點列名可以改名。</span></p>' : ''}
+            ${edit ? '<p class="tools"><button class="plain" id="addR">＋ 休息列</button> <span class="muted">外勤列、第二位值班、第三位 91／92、多加的休息列可以按右邊 ✕ 刪除；點列名可以改名。</span></p>' : ''}
           </div>
           <div class="card" id="hrs"></div>
         </div>
@@ -650,7 +695,9 @@
       });
       return { rows: sortRows(out), notes };
     };
-    const sortRows = list => FIXED_TYPES.flatMap(t => list.filter(r => r.type === t)).concat(list.filter(r => !FIXED_TYPES.includes(r.type)));
+    // 列的分組：固定的值班／一救／二救／休息；外勤裡勤務表列是值班、一救、二救的（第二位值班、第三位 91／92）放到那一組下面
+    const groupOf = r => (FIXED_TYPES.includes(r.type) ? r.type : DUTY_TYPES.includes(r.place) ? r.place : '外勤');
+    const sortRows = list => FIXED_TYPES.concat('外勤').flatMap(g => list.filter(r => groupOf(r) === g && FIXED_TYPES.includes(r.type)).concat(list.filter(r => groupOf(r) === g && !FIXED_TYPES.includes(r.type))));
 
     // ---- 畫格子 ----
     // 備勤下限（C23）：駕訓那幾個小時車和人出去了，下限減少
@@ -674,16 +721,24 @@
     const draw = () => {
       const w = $('#gw'), left = w.scrollLeft;
       const people = pm();
-      const sb = HOURS.map((x, h) => standby(h));
-      w.innerHTML = `<table class="grid day"><colgroup><col style="width:92px">${'<col style="width:28px">'.repeat(24)}<col style="width:22px"></colgroup>
-        <tr><th class="lbl">時間</th>${HOURS.map(h => `<th>${h}</th>`).join('')}<th></th></tr>
-        <tr class="sb"><th class="lbl">備勤人員</th>${sb.map((list, h) => `<td class="${list.length < minAt(h) ? 'low' : ''}" title="${list.length} 人（下限 ${minAt(h)}）">${list.map(p => `<div>${esc(p.num)}</div>`).join('')}<div class="n">${list.length}</div></td>`).join('')}<td></td></tr>` +
+      // 備勤人員：每小時都列出全部在隊的人，有排班的變空格，番號左右對齊（同 4.2 版）
+      const all = D.people.filter(p => p.status !== '不計人力');
+      const sb = HOURS.map((x, h) => { const busy = busyAt(h); return all.map(p => (busy.has(String(p.num)) ? '' : String(p.num))); });
+      const C = D.colors || {}, bg = c => (c ? ` style="background:${esc(c)};color:#1f2328"` : '');
+      // 格子顏色：這個人的固定班（A1、B1、宿…）在它自己的時段、自己的列，就上那個班的顏色
+      const cellBg = (r, h, v) => {
+        const p = v && people[v], def = p && defOf(p.code);
+        return def && C['班:' + def.name] && def.kind === r.type && def.hours.includes(HOURS[h]) ? bg(C['班:' + def.name]) : '';
+      };
+      w.innerHTML = `<table class="grid day"><colgroup><col style="width:64px">${'<col>'.repeat(24)}<col style="width:20px"></colgroup>
+        <tr${bg(C['列:時間'])}><th class="lbl">時間</th>${HOURS.map(h => `<th>${h}</th>`).join('')}<th></th></tr>
+        <tr class="sb"><th class="lbl"${bg(C['列:備勤人員'])}>備勤人員</th>${sb.map((list, h) => { const n = list.filter(Boolean).length; return `<td class="${n < minAt(h) ? 'low' : ''}" title="${n} 人（下限 ${minAt(h)}）">${list.map(v => `<div>${v ? esc(v) : '&nbsp;'}</div>`).join('')}<div class="n">${n}</div></td>`; }).join('')}<td></td></tr>` +
         rows.map((r, k) => {
-          const first = k === 0 || rows[k - 1].type !== r.type || !FIXED_TYPES.includes(r.type);
+          const g = groupOf(r), first = k === 0 || groupOf(rows[k - 1]) !== g || g === '外勤';
           const nth = rows.slice(0, k).filter(x => x.type === r.type).length;   // 這一類的第幾列（0 起）
-          const extra = !FIXED_TYPES.includes(r.type) || (r.type === '二救' && nth >= 2) || (r.type === '休息' && nth >= 4);
-          return `<tr class="t-${FIXED_TYPES.includes(r.type) ? r.type : '外勤'}${first ? ' first' : ''}"><th class="lbl rl" data-row="${k}" title="${esc(r.item ? r.item + (r.category ? '／' + r.category : '') : r.type)}">${esc(r.label)}</th>` +
-            r.cells.map((v, h) => `<td data-r="${k}" data-h="${h}" class="${cellClass(k, h)}" title="${esc(v && people[v] ? people[v].name + '（' + (people[v].code || '空白') + (people[v].off ? '，休假中' : '') + '）' : v ? '不在今天的名單' : '')}">${esc(v)}</td>`).join('') +
+          const extra = !FIXED_TYPES.includes(r.type) || (r.type === '休息' && nth >= 4);
+          return `<tr class="t-${g}${first ? ' first' : ''}${FIXED_TYPES.includes(r.type) ? '' : ' sub'}"><th class="lbl rl" data-row="${k}"${bg(C['列:' + g])} title="${esc(r.item ? r.item + (r.category ? '／' + r.category : '') : r.type)}">${esc(r.label)}</th>` +
+            r.cells.map((v, h) => `<td data-r="${k}" data-h="${h}" class="${cellClass(k, h)}"${cellBg(r, h, v)} title="${esc(v && people[v] ? people[v].name + '（' + (people[v].code || '空白') + (people[v].off ? '，休假中' : '') + '）' : v ? '不在今天的名單' : '')}">${esc(v)}</td>`).join('') +
             `<td>${edit && extra ? `<button class="x" data-del="${k}" title="刪除這列">✕</button>` : ''}</td></tr>`;
         }).join('') + '</table>';
       w.scrollLeft = left;
@@ -703,8 +758,8 @@
       const hrs = {}, rest = {};
       rows.forEach(r => r.cells.forEach(v => { if (!v) return; (r.type === '休息' ? rest : hrs)[v] = ((r.type === '休息' ? rest : hrs)[v] || 0) + 1; }));
       const night = Object.fromEntries(D.night.map(n => [String(n.num), n.hours]));
-      $('#hrs').innerHTML = `<h2>今天在隊 ${D.people.length} 人</h2><div class="muted">點一列，格子裡這個人會標出來。黃底＝昨天深夜勤（12 點前盡量不排）。</div>
-        <table class="hours"><tr><th>番號</th><th>姓名</th><th>班別</th><th>時數</th><th>休息</th><th>昨天深夜勤</th></tr>` +
+      $('#hrs').innerHTML = `<h2>今天在隊 ${D.people.length} 人</h2><div class="muted">點一列，格子裡這個人會標出來。黃底＝昨天深夜勤（昨夜欄，12 點前盡量不排）。</div>
+        <table class="hours"><tr><th>番號</th><th>姓名</th><th>班別</th><th>時數</th><th>休息</th><th title="昨天深夜勤">昨夜</th></tr>` +
         D.people.concat(D.off.filter(p => hrs[p.num] || rest[p.num]).map(p => Object.assign({ off: true }, p))).map(p => { const k = String(p.num); return `<tr data-num="${k}" class="${hl === k ? 'on' : ''} ${night[k] ? 'night' : ''}"><td>${esc(p.num)}</td><td>${esc(p.name)}${p.status === '不計人力' ? '<span class="muted">（不計人力）</span>' : ''}${p.off ? '<span class="muted">（休假）</span>' : ''}</td><td>${esc(p.code)}</td><td>${hrs[k] || ''}</td><td>${rest[k] || ''}</td><td>${night[k] ? night[k][0] + '–' + hourLabel(HOURS.indexOf(night[k][night[k].length - 1]) + 1) : ''}</td></tr>`; }).join('') +
         '</table>';
     };
@@ -712,13 +767,13 @@
     // ---- 新增外勤 ----
     const drawAdd = () => {
       if (!edit) return;
-      $('#addx').innerHTML = `<h2>新增外勤</h2>
+      $('#addx').innerHTML = `<h2>新增勤務</h2>
         <div class="row"><select id="it">${D.items.map((x, k) => `<option value="${k}">${esc(x.name)}</option>`).join('')}</select>
           <input id="itx" placeholder="內容" size="10" hidden>
           <select id="st">${HOURS.map((h, i) => `<option value="${i}">${h}</option>`).join('')}</select> 到
-          <select id="en">${HOURS.map((h, i) => `<option value="${i + 1}">${hourLabel(i + 1)}</option>`).join('')}</select></div>
+          <select id="en"></select></div>
         <div class="muted">勾要出勤的人（<span class="busytag">橘色</span>＝那段時間已經有排）：</div><div class="chips" id="who"></div>
-        <button id="addgo">加入外勤</button> <span class="muted">沒勾人就加一列空的，之後再填。</span>`;
+        <button id="addgo">加入勤務</button> <span class="muted">沒勾人就加一列空的，之後再填。</span>`;
       const it = () => D.items[Number($('#it').value)];
       const refresh = () => {
         $('#itx').hidden = !it().label.includes('{}');
@@ -729,11 +784,15 @@
         $('#who').innerHTML = D.people.map(box).join('') +
           (D.off.length ? `<div class="sep">休假中（外勤可以排）</div>` + D.off.map(p => box(Object.assign({ off: true }, p))).join('') : '');
       };
-      $('#it').onchange = $('#st').onchange = $('#en').onchange = () => {
-        if (Number($('#en').value) <= Number($('#st').value)) $('#en').value = Number($('#st').value) + 1;
-        refresh();
+      // 結束時間只列起始之後的，選了起始就自動跳到下一個小時（同 4.2 版表單）
+      const ends = () => {
+        const a = Number($('#st').value);
+        $('#en').innerHTML = range(a + 1, 25).map(i => `<option value="${i}">${hourLabel(i)}</option>`).join('');
+        $('#en').value = a + 1;
       };
-      $('#st').value = 0; $('#en').value = 2;
+      $('#st').onchange = () => { ends(); refresh(); };
+      $('#it').onchange = $('#en').onchange = refresh;
+      $('#st').value = 0; ends();
       $('#addgo').onclick = () => {
         const x = it(), a = Number($('#st').value), b = Number($('#en').value);
         if (x.label.includes('{}') && !$('#itx').value.trim()) { $('#msg').textContent = `請輸入「${x.name}」的內容。`; $('#itx').focus(); return; }
@@ -753,6 +812,7 @@
         if (num) for (let h = a; h < b; h++) cells[h] = String(num);
         rows.push({ type: '外勤', label, item: x.name, place: x.place, text: x.text, code: x.code, category: x.category, cells, need: num ? null : need, ev: evk || '' });
       });
+      rows = sortRows(rows);
       setDirty(true); draw();
     };
 
@@ -796,6 +856,7 @@
         if (num) for (let h = a; h < b; h++) cells[h] = num;
         rows.push({ type: '外勤', label: ev.duty, item: x.name, place: x.place, text: x.text, code: x.code, category: x.category, cells, need: num ? null : range(a, b), ev: evKey(ev) });
       });
+      rows = sortRows(rows);
       return freed;
     };
     const addEvent = k => {
@@ -1045,7 +1106,6 @@
         if (!D || !confirm('放棄這一天還沒存檔的修改？')) return;
         dirty = false; saveDraft(); load('已放棄修改。');
       };
-      $('#add2').onclick = () => { rows.push({ type: '二救', label: '二救', cells: blank() }); rows = sortRows(rows); setDirty(true); draw(); };
       $('#addR').onclick = () => { rows.push({ type: '休息', label: '休息' + (rows.filter(r => r.type === '休息').length + 1), cells: blank() }); rows = sortRows(rows); setDirty(true); draw(); };
       $('#memo').oninput = () => setDirty(true);
       $('#save').onclick = () => {
