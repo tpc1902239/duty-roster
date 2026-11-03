@@ -115,7 +115,7 @@
    * opts.today：粗體的日；opts.mark(d, i) 回傳格子額外的 class；opts.title
    */
   // 固定欄寬，讓月班表和已排次數上下對齊：前兩欄（日、星期／標題）＋每人一欄
-  const cols = n => `<colgroup><col style="width:26px"><col style="width:30px">${'<col style="width:30px">'.repeat(n)}</colgroup>`;
+  const cols = n => `<colgroup><col style="width:24px"><col style="width:26px">${'<col style="width:24px">'.repeat(n)}</colgroup>`;
 
   function rosterTable(y, m, people, days, opts = {}) {
     const nums = people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
