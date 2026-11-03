@@ -4,7 +4,8 @@
  */
 
 const SHIFT_CODES = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', '宿'];   // 還沒有「固定排班」分頁時用
-const DUTY_KINDS = ['值班', '救護'];
+const DUTY_KINDS = ['值班', '救護'];   // 編制人員的限排勤務
+const SHIFT_KINDS = ['值班', '一救', '二救', '休息'];   // 固定排班放到排班區的哪一列
 const HOURS = ['08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '00', '01', '02', '03', '04', '05', '06', '07'];
 const GROUP_BG = ['#c9daf0', '#ffffff', '#dcebd5', '#ffffff', '#dcebd5', '#f3e6f5'];
 const TABLES = { '車輛': '車輛承辦', '救護訓練': '救護訓練承辦' };
@@ -36,19 +37,34 @@ function guarded_(name, version, fn) {
 
 // ---------- 固定排班設定 ----------
 
-/** 「固定排班」分頁：名稱（A1…）、時間（08,09,…）、勤務別（值班／救護）。 */
+/**
+ * 「固定排班」分頁：名稱（A1…）、時間（08,09,…）、勤務別（值班／一救／二救／休息）、第幾位（一救、二救有兩列）。
+ * 舊設定的勤務別「救護」當成一救；沒填第幾位時，名稱尾巴是 2 的放第 2 位。
+ */
 function shiftDefs_() {
   if (!SpreadsheetApp.getActive().getSheetByName('固定排班')) return [];
-  return rows_('固定排班').map(r => ({
-    name: str_(r['名稱']), kind: str_(r['勤務別']),
-    hours: str_(r['時間']).split(/[,，、\s]+/).filter(h => h).map(h => pad_(Number(h))),
-  })).filter(d => d.name);
+  return rows_('固定排班').map(r => {
+    const name = str_(r['名稱']);
+    let kind = str_(r['勤務別']);
+    if (kind === '救護') kind = '一救';
+    return {
+      name, kind,
+      pos: Number(r['第幾位']) || (/2$/.test(name) ? 2 : 1),
+      hours: str_(r['時間']).split(/[,，、\s]+/).filter(h => h).map(h => pad_(Number(h))),
+    };
+  }).filter(d => d.name);
 }
 
 /** 月班表上算「固定排班」的代碼：設定裡的名稱；還沒設定就用 A1～B3、宿。 */
 function shiftNames_() {
   const defs = shiftDefs_();
   return defs.length ? defs.map(d => d.name) : SHIFT_CODES;
+}
+
+/** 算「已排次數」的固定排班：休息類（例如「長」）不算。 */
+function countNames_() {
+  const defs = shiftDefs_();
+  return defs.length ? defs.filter(d => d.kind !== '休息').map(d => d.name) : SHIFT_CODES;
 }
 
 function getShiftDefs(token) {
@@ -64,17 +80,18 @@ function saveShiftDefs(token, defs, version) {
     if (!d.name) throw new Error('名稱不能空白');
     if (seen[d.name]) throw new Error('名稱重複：' + d.name);
     seen[d.name] = true;
-    if (DUTY_KINDS.indexOf(d.kind) < 0) throw new Error(d.name + '：勤務別要選' + DUTY_KINDS.join('或'));
+    if (SHIFT_KINDS.indexOf(d.kind) < 0) throw new Error(d.name + '：勤務別要選' + SHIFT_KINDS.join('、'));
+    d.pos = Number(d.pos) || 1;
     if (!d.hours.length || d.hours.some(h => HOURS.indexOf(h) < 0)) throw new Error(d.name + '：請勾選時間');
   });
   return guarded_('固定排班', version, () => {
     const ss = SpreadsheetApp.getActive();
     const sh = ss.getSheetByName('固定排班') || ss.insertSheet('固定排班');
-    const values = [['名稱', '時間', '勤務別']].concat(defs.map(d =>
-      [d.name, HOURS.filter(h => d.hours.indexOf(h) >= 0).join(','), d.kind]));
+    const values = [['名稱', '時間', '勤務別', '第幾位']].concat(defs.map(d =>
+      [d.name, HOURS.filter(h => d.hours.indexOf(h) >= 0).join(','), d.kind, String(d.pos)]));
     sh.clear();
-    sh.getRange(1, 1, values.length, 3).setNumberFormat('@').setValues(values);
-    sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#ddebf7');
+    sh.getRange(1, 1, values.length, 4).setNumberFormat('@').setValues(values);
+    sh.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#ddebf7');
     sh.setFrozenRows(1);
     delete cache_['固定排班'];
     log_(s.user, '固定排班設定', defs.map(d => d.name).join('、'));
@@ -266,7 +283,7 @@ function saveShifts(token, y, m, changes, version) {
  */
 function getShiftCounts(token, y, m) {
   need_(token);
-  const names = shiftNames_(), before = {};
+  const names = countNames_(), before = {};
   const add = (k, sign) => {   // 第 k 月每個人各個固定排班的次數加進（或扣出）before
     if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, k, '月班表'))) return;
     const mo = month_(y, k);

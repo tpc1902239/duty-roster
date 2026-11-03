@@ -19,6 +19,7 @@ function doGet() {
 const api_ = () => ({
   needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, recentLog,
   loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable, getUnitStaff, saveUnitStaff, saveBase,
+  getItems, saveItems, getDay, saveDay,
 });
 
 /**
