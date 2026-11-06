@@ -535,13 +535,23 @@
 
   // ---------- 外勤項目設定 ----------
 
+  /** 行事曆事項對應外勤項目：由上往下比對關鍵字（沒填關鍵字就用名稱），第一個對到的就是；都沒對到算「其他勤務」。 */
+  const keywordsOf = i => String(i.keywords || '').split(/[、,，\s]+/).filter(Boolean);
+  function matchItem(items, duty) {
+    const t = String(duty || '');
+    return items.find(i => (keywordsOf(i).length ? keywordsOf(i) : [i.name]).some(k => k && t.includes(k)))
+      || items.find(i => i.name === '其他勤務') || items[items.length - 1];
+  }
+
   function pageItems(main) {
     const edit = has('排班');
     main.innerHTML = `<h1>外勤項目設定</h1>
       <div class="muted">排班區「新增外勤」的選單就是這張表，同 4.2 版表單 4 的選項。以後多一種勤務，在這裡新增一列就好。<br>
       <b>列名格式</b>：空白＝用名稱；有 {} 的，排班時會請你輸入內容換掉 {}（例如「水源第{}梯」輸入 8 → 水源第8梯）。<br>
       <b>勤務表列</b>：輸出勤務表時放哪一列；選值班、一救、二救的（第二位值班、第三位 91／92）會併進那一列。
-      <b>文字欄</b>：輸出時這項的文字寫在「備註」還是「搶救演練及訓練」。<b>大隊代碼</b>：大隊報表用（同 4.2 版 AB 欄）。<b>勤務類別</b>：我們自己統計用；填「訓練」的不算連續 8 小時。</div>
+      <b>文字欄</b>：輸出時這項的文字寫在「備註」還是「搶救演練及訓練」。<b>大隊代碼</b>：大隊報表用（同 4.2 版 AB 欄）。<b>勤務類別</b>：我們自己統計用；填「訓練」的不算連續 8 小時。<br>
+      <b>行事曆關鍵字</b>：行事曆的事由有這些字，就自動歸到這一項（用「、」隔開）。<b>由上往下比對，第一個對到的就是</b>，所以範圍小的放上面（例如「大車駕訓」要在「駕訓」上面、「開會」要在「宣導」上面）；都沒對到算「其他勤務」。</div>
+      <div class="card"><b>試試看</b>　<input id="try" placeholder="輸入行事曆事由，例如：115年防火宣導業務會議" size="36"> <span id="tryout"></span></div>
       <div class="card"><div class="scroll" id="list"></div>
         ${edit ? '<p><button class="plain" id="add">＋ 新增</button> <button id="save">儲存</button> <span id="msg" class="muted"></span></p>' : ''}</div>`;
     const $ = s => main.querySelector(s);
@@ -549,7 +559,7 @@
     const dis = edit ? '' : 'disabled';
     const opt = (list, v) => list.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x || '（不寫）')}</option>`).join('');
     const draw = () => {
-      $('#list').innerHTML = `<table class="defs items"><tr><th>名稱</th><th>列名格式</th><th>勤務表列</th><th>文字欄</th><th>大隊代碼</th><th>勤務類別</th>${edit ? '<th></th>' : ''}</tr>` +
+      $('#list').innerHTML = `<table class="defs items"><tr><th>名稱</th><th>列名格式</th><th>勤務表列</th><th>文字欄</th><th>大隊代碼</th><th>勤務類別</th><th>行事曆關鍵字</th>${edit ? '<th></th>' : ''}</tr>` +
         items.map((x, k) => `<tr data-k="${k}">
           <td><input class="nm" value="${esc(x.name)}" size="10" ${dis}></td>
           <td><input class="lb" value="${esc(x.label)}" size="10" ${dis}></td>
@@ -557,21 +567,40 @@
           <td><select class="tx" ${dis}>${opt(texts, x.text)}</select></td>
           <td><input class="cd" value="${esc(x.code)}" size="3" ${dis}></td>
           <td><input class="ct" value="${esc(x.category)}" size="6" ${dis}></td>
-          ${edit ? '<td><button class="plain del">刪除</button></td>' : ''}</tr>`).join('') + '</table>';
+          <td><input class="kw" value="${esc(x.keywords || '')}" size="22" ${dis} placeholder="${x.name === '其他勤務' ? '（都沒對到的）' : '空白＝用名稱'}"></td>
+          ${edit ? `<td class="nowrap"><button class="plain up" title="往上" ${k ? '' : 'disabled'}>↑</button><button class="plain down" title="往下" ${k < items.length - 1 ? '' : 'disabled'}>↓</button> <button class="plain del">刪除</button></td>` : ''}</tr>`).join('') + '</table>';
+      tryIt();
     };
     const read = () => main.querySelectorAll('tr[data-k]').forEach(tr => {
       const x = items[Number(tr.dataset.k)];
       x.name = tr.querySelector('.nm').value.trim(); x.label = tr.querySelector('.lb').value.trim();
       x.place = tr.querySelector('.pl').value; x.text = tr.querySelector('.tx').value;
       x.code = tr.querySelector('.cd').value.trim(); x.category = tr.querySelector('.ct').value.trim();
+      x.keywords = tr.querySelector('.kw').value.trim();
     });
+    const tryIt = () => {
+      const t = $('#try').value.trim();
+      if (!t) { $('#tryout').textContent = ''; return; }
+      if (edit) read();
+      const x = matchItem(items, t);
+      $('#tryout').innerHTML = `→ <b>${esc(x.name)}</b>（${esc(x.place)}／${esc(x.text || '不寫')}／${esc(x.code)}）`;
+    };
+    $('#try').oninput = tryIt;
     const load = (done = '') => call('getItems').then(r => {
       items = r.items; version = r.version; places = r.places; texts = r.texts; draw();
       if ($('#msg')) $('#msg').textContent = done || (version ? '' : '目前是預設值（照 4.2 版），按「儲存」後才會存進資料庫。');
     });
     if (edit) {
-      $('#add').onclick = () => { read(); items.push({ name: '', label: '', place: places[2], text: texts[0], code: '', category: '' }); draw(); main.querySelector('tr[data-k]:last-child .nm').focus(); };
-      $('#list').onclick = e => { const b = e.target.closest('.del'); if (!b) return; read(); items.splice(Number(b.closest('tr').dataset.k), 1); draw(); };
+      $('#add').onclick = () => { read(); items.push({ name: '', label: '', place: places[2], text: texts[0], code: '', category: '', keywords: '' }); draw(); main.querySelector('tr[data-k]:last-child .nm').focus(); };
+      $('#list').onclick = e => {
+        const b = e.target.closest('.del, .up, .down'); if (!b) return;
+        read();
+        const k = Number(b.closest('tr').dataset.k);
+        if (b.classList.contains('del')) items.splice(k, 1);
+        else { const j = b.classList.contains('up') ? k - 1 : k + 1; [items[k], items[j]] = [items[j], items[k]]; }
+        draw();
+      };
+      $('#list').addEventListener('input', e => { if (e.target.closest('.kw, .nm')) tryIt(); });
       $('#save').onclick = () => {
         read(); $('#msg').textContent = '儲存中…';
         call('saveItems', items, version).then(r => load(`已儲存 ${r.count} 項。`)).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
@@ -843,7 +872,7 @@
     /** 把行事曆事項放進排班區（不重畫），回傳空出來要代班的格子。 */
     const putEvent = ev => {
       const [a, b] = evRange(ev), nums = evNums(ev), freed = [];
-      const x = D.items.find(i => ev.duty.includes(i.name)) || D.items.find(i => i.name === '其他勤務') || D.items[0];
+      const x = matchItem(D.items, ev.duty);
       if (ev.kind === '休息') {
         nums.forEach(num => {
           let row = rows.find(r => r.type === '休息' && range(a, b).every(h => !r.cells[h]));
