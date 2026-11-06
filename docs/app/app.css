@@ -104,25 +104,19 @@ table.hours th, table.hours td { padding:1px 4px; font-size:12px; }
 table.grid.day tr.sub th.lbl { font-size:11px; font-weight:400; }
 table.colors td { padding:3px 8px; } table.colors input[type=color] { width:48px; height:26px; padding:0; border:1px solid var(--line); }
 table.colors input.dim { opacity:.3; } .swatch { display:inline-block; min-width:40px; padding:1px 6px; border:1px solid #8c959f; color:#1f2328; }
-/* 輸出勤務表 */
+/* 輸出勤務表（版面照 4.2 版） */
 .extra { margin:8px 0 0; font-size:13px; } .extra input { width:auto; padding:2px 6px; margin-right:6px; }
 .sheetwrap { position:fixed; inset:0; z-index:50; background:var(--bg); overflow:auto; padding:12px; }
 .sheetbar { margin-bottom:8px; }
-.sheet { background:#fff; color:#000; padding:10px; max-width:1400px; }
-.sheet .stitle { font-size:16px; font-weight:700; text-align:center; margin-bottom:4px; }
-.sheet table.st { border-collapse:collapse; width:100%; margin-bottom:4px; table-layout:fixed; }
-.sheet table.st th, .sheet table.st td { border:1px solid #000; padding:1px 2px; font-size:11px; white-space:normal; word-break:break-all; color:#000; background:#fff; }
-.sheet table.st th:first-child { width:80px; }
-.sheet table.st td.l { text-align:left; }
-.sheet table.team td, .sheet table.team th { font-size:11px; }
-.sheet table.team th:first-child { width:90px; }
-.sheet .srow { display:flex; gap:6px; } .sheet .srow > table { flex:1; }
-.sheet table.memo td.l { vertical-align:top; height:60px; }
+.s42wrap { background:#fff; display:inline-block; zoom:0.6; }
+table.s42 { border-collapse:collapse; table-layout:fixed; background:#fff; color:#000; font-family:"DFKai-SB","BiauKai","標楷體","Kaiti TC","KaiTi",serif; }
+table.s42 td { border:1px solid #000; padding:1px 3px; line-height:1.15; white-space:pre-wrap; word-break:break-all; overflow:hidden; color:#000; background:#fff; }
+table.s42 td.diag { background:linear-gradient(to top right, transparent calc(50% - .5px), #000 50%, transparent calc(50% + .5px)); }
 @media print {
   @page { size:A4 landscape; margin:6mm; }
   body:has(> #sheet) > *:not(#sheet) { display:none !important; }
   body:has(> #sheet) { background:#fff; }
   .sheetwrap { position:static; padding:0; overflow:visible; background:#fff; }
-  .sheet { max-width:none; padding:0; }
+  .s42wrap { zoom:var(--pz); }
   .noprint { display:none; }
 }
