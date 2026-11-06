@@ -123,7 +123,7 @@ function getDay(token, date) {
     off: (runs => off.map(p => ({ num: p.num, name: p.name, code: p.code, role: p.role, run: runs[p.name] })))(leaveRuns_(date, off.map(p => p.name), names, on)),
     away: roster.away.map(p => ({ num: p.num, name: p.name, role: p.role })),
     defs: shiftDefs_(), items: items_(), colors: colors_(), events, calendarError,
-    night: lastNight_(date),
+    yesterday: yesterday_(date, names), prevMemo: prevMemo_(date),
     saved, version: version_(sheetName_(y, m, '存檔')),
     // 勤務表標題的「N 人」：編制人員裡在隊／算人力的人數；沒有編制人員就用月班表人數
     headcount: Object.keys(unit).length ? Object.keys(unit).filter(k => ['在隊', '算人力'].indexOf(unit[k].status) >= 0).length : roster.here.length + roster.away.length,
@@ -134,45 +134,17 @@ function getDay(token, date) {
   };
 }
 
-/**
- * 昨天深夜勤（00–08 有排值班或救護）的人：[{num, name, hours}]。
- * 昨天有存檔就看存檔；沒有就看昨天月班表的固定排班。
- */
-function lastNight_(date) {
-  const prev = addDays_(date, -1);
-  const [y, m, d] = prev.split('-').map(Number);
-  const late = HOURS.slice(16);   // 00..07
+/** 昨天的班別（月班表）：{姓名: 班別}，只留班別（例如 A1、宿、長），不含假別。 */
+function yesterday_(date, names) {
   const out = {};
-  const finish = o => nightList_(o, prev);
-  const add = (num, name, h) => { const k = String(num); (out[k] = out[k] || { num, name, hours: [] }).hours.push(h); };
-  try {
-    const saved = readDay_(y, m, d);
-    if (saved) {
-      const who = Object.fromEntries(saved.people.map(p => [String(p.num), p.name]));
-      saved.rows.filter(r => ['值班', '一救', '二救'].indexOf(r.type) >= 0 || r.place === '值班' || r.place === '一救' || r.place === '二救')
-        .forEach(r => late.forEach(h => { const v = r.cells[HOURS.indexOf(h)]; if (v) add(v, who[v] || '', h); }));
-      return finish(out);
-    }
-    const defs = Object.fromEntries(shiftDefs_().filter(x => x.kind !== '休息').map(x => [x.name, x]));
-    dayRoster_(prev).here.forEach(p => {
-      const def = defs[p.code];
-      if (def) def.hours.filter(h => late.indexOf(h) >= 0).forEach(h => add(p.num, p.name, h));
-    });
-  } catch (e) { /* 上個月還沒有資料 */ }
-  return finish(out);
+  try { dayRoster_(addDays_(date, -1)).here.forEach(p => { if (names.indexOf(p.code) >= 0) out[p.name] = p.code; }); } catch (e) { /* 上個月還沒有資料 */ }
+  return out;
 }
 
-/** 昨天深夜勤：補上姓名、時數排好。 */
-function nightList_(out, prev) {
-  let who = {};
-  try { const r = dayRoster_(prev); who = Object.fromEntries(r.here.concat(r.away).map(p => [String(p.num), p.name])); } catch (e) { /* 沒有月班表 */ }
-  const late = HOURS.slice(16);
-  return Object.keys(out).map(k => {
-    const x = out[k];
-    x.name = x.name || who[k] || '';
-    x.hours = late.filter(h => x.hours.indexOf(h) >= 0);
-    return x;
-  });
+/** 前一天存檔的備註，新的一天帶入用。 */
+function prevMemo_(date) {
+  const [y, m, d] = addDays_(date, -1).split('-').map(Number);
+  try { const s = readDay_(y, m, d); return s ? s.memo : ''; } catch (e) { return ''; }
 }
 
 // ---------- 存檔 ----------
