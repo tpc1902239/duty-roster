@@ -165,10 +165,18 @@ function parseTitle_(title) {
   const T = '(\\d{1,2})(?::?\\d{2})?\\s*[-~～－–]\\s*(\\d{1,2})(?::?\\d{2})?\\s*時?';
   const m = String(title).match(new RegExp('^(.*?)[（(]\\s*' + T + '\\s*[）)](.*)$')) ||
             String(title).match(new RegExp('^(.*?)\\s+' + T + '(.*)$'));
-  if (!m) return { title, duty: String(title).trim(), start: null, end: null, names: [], rest: false };
+  if (!m) return { title, duty: String(title).trim(), start: null, end: null, names: [], note: '', rest: false };
   const duty = m[1].trim();
-  const names = m[4].replace(/^[\s\-－–]+/, '').split(/[、,，\s]+/).filter(Boolean);
-  return { title, duty, start: Number(m[2]), end: Number(m[3]), names, rest: /休息/.test(duty) };
+  const who = splitNames_(m[4]);
+  return { title, duty, start: Number(m[2]), end: Number(m[3]), names: who.names, note: who.note, rest: /休息/.test(duty) };
+}
+
+/** 「-張明發、11(帶隊)」→ names [張明發, 11]、note 帶隊。人員可以寫姓名、別名或番號；最後括號裡是備註，只顯示不排班。 */
+function splitNames_(text) {
+  let t = String(text || '').replace(/^[\s\-－–]+/, '').trim(), note = '';
+  const n = t.match(/[（(]([^（()）]*)[）)]\s*$/);
+  if (n) { note = n[1].trim(); t = t.slice(0, n.index).trim(); }
+  return { names: t.split(/[、,，\s]+/).filter(Boolean), note };
 }
 
 /** 某一天的日曆勤務，並把人名對應到人員。 */
@@ -185,7 +193,7 @@ function calendarOn_(date) {
       const H = d => Number(Utilities.formatDate(d, 'Asia/Taipei', 'H')), M = d => Number(Utilities.formatDate(d, 'Asia/Taipei', 'm'));
       const parts = String(ev.getTitle()).split(/[-－–]/);
       t.duty = parts[0].trim();
-      t.names = parts.slice(1).join('-').split(/[、,，\s]+/).filter(Boolean);
+      Object.assign(t, splitNames_(parts.slice(1).join('-')));
       t.start = H(st);
       t.end = en - st >= 86400000 ? 8 : (H(en) + (M(en) ? 1 : 0)) % 24;
       t.rest = /休息/.test(t.duty);
