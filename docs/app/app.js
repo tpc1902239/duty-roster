@@ -1352,8 +1352,7 @@
         const h = ha || (r === 13 || r === 15 || r === 32 ? 'l' : '');
         return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
       }).join('') + '</tr>').join('');
-      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel（同時存到資料庫）</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
-          <span class="muted">內容是畫面上現在的排班（含還沒存檔的修改）。Excel 用 4.2 版的勤務表範本填好，直接開來列印最準（A3 橫向）。</span>
+      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
           <div id="smsg"></div>
           ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
         <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
@@ -1361,46 +1360,55 @@
       document.getElementById('sxlsx').onclick = () => excelOut(V);
     }).catch(e => alert(e.message));
 
-    // ---- 下載 Excel：資料庫的「勤務表範本.xlsx」填好內容，下載一份、雲端硬碟存一份 ----
-    const needExcel = () => (window.ExcelJS ? Promise.resolve() : new Promise((ok, bad) => {
-      const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    // ---- 下載 Excel：資料庫的「勤務表範本.xlsx」（4.2 版原檔清空每天會變的格子）直接改 XML 填值 ----
+    // 只動要填的格子，欄寬、列高、字型、表頭斜線、列印設定都照原檔，印出來跟 4.2 版一樣大
+    const needZip = () => (window.JSZip ? Promise.resolve() : new Promise((ok, bad) => {
+      const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
       s.onload = ok; s.onerror = () => bad(new Error('Excel 元件載入失敗，請檢查網路'));
       document.head.appendChild(s);
     }));
-    // 表頭兩條斜線：左上角 → 右下角、A／B 欄交界上緣 → 右下角
-    const headLines = () => {
-      const S = window.SHEET42, w = S.cols[0] + S.cols[1], h = S.rows[1], k = 4;
-      const cv = document.createElement('canvas'); cv.width = w * k; cv.height = h * k;
-      const g = cv.getContext('2d'); g.strokeStyle = '#000'; g.lineWidth = 1.2 * k;
-      g.beginPath(); g.moveTo(0, 0); g.lineTo(w * k, h * k); g.moveTo(S.cols[0] * k, 0); g.lineTo(w * k, h * k); g.stroke();
-      return cv.toDataURL('image/png');
-    };
     const b64ToBuf = b64 => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
-    const bufToB64 = buf => { const u = new Uint8Array(buf); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(t); };
+    const colNum = s => [...s].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+    const fillSheet = (xml, V) => {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml'), NS = doc.documentElement.namespaceURI;
+      const data = doc.getElementsByTagNameNS(NS, 'sheetData')[0], rowOf = {};
+      [...data.children].forEach(r => { rowOf[r.getAttribute('r')] = r; });
+      const el = (tag, parent, before) => parent.insertBefore(doc.createElementNS(NS, tag), before || null);
+      Object.keys(V).forEach(addr => {
+        const [, col, rn] = addr.match(/^([A-Z]+)(\d+)$/);
+        let row = rowOf[rn];
+        if (!row) { row = rowOf[rn] = el('row', data, [...data.children].find(x => Number(x.getAttribute('r')) > Number(rn))); row.setAttribute('r', rn); }
+        let c = [...row.children].find(x => x.getAttribute('r') === addr);
+        if (!c) { c = el('c', row, [...row.children].find(x => colNum(x.getAttribute('r').replace(/\d+/, '')) > colNum(col))); c.setAttribute('r', addr); }
+        while (c.firstChild) c.removeChild(c.firstChild);
+        c.removeAttribute('t');
+        const v = V[addr] == null ? '' : String(V[addr]);
+        if (v === '') return;
+        if (/^\d+$/.test(v)) { el('v', c).textContent = v; return; }
+        c.setAttribute('t', 'inlineStr');
+        const t = el('t', el('is', c));
+        t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
+        t.textContent = v;
+      });
+      return new XMLSerializer().serializeToString(doc);
+    };
     const excelOut = V => {
-      const msg = t => { const el = document.getElementById('smsg'); if (el) el.innerHTML = t; };
+      const msg = t => { const e = document.getElementById('smsg'); if (e) e.innerHTML = t; };
       const btn = document.getElementById('sxlsx'); if (btn) btn.disabled = true;
       msg('<span class="muted">產生 Excel 中…</span>');
-      const name = D.date + ' 勤務表.xlsx';
-      Promise.all([needExcel(), call('getSheetTemplate')]).then(([, t]) => {
+      const name = D.date + ' 勤務表.xlsx', SHEET = 'xl/worksheets/sheet1.xml';
+      Promise.all([needZip(), call('getSheetTemplate')]).then(([, t]) => {
         if (!t.data) throw new Error(`資料庫還沒有勤務表範本：請把「${t.name}」放到系統帳號雲端硬碟的「${t.folder}」資料夾`);
-        const wb = new ExcelJS.Workbook();
-        return wb.xlsx.load(b64ToBuf(t.data)).then(() => {
-          const ws = wb.worksheets[0];
-          Object.keys(V).forEach(k => { const v = V[k]; ws.getCell(k).value = v === '' ? null : /^\d+$/.test(v) ? Number(v) : v; });
-          // 左上角表頭：4.2 版用兩條線（Excel 圖形）分出勤務／項目／編號／時間，範本讀進來會不見，這裡畫成透明圖片蓋回去
-          ws.getCell('A2').value = '勤務         項目    編號\n時間';
-          ws.addImage(wb.addImage({ base64: headLines(), extension: 'png' }), { tl: { col: 0, row: 1 }, br: { col: 2, row: 2 }, editAs: 'twoCell' });
-          return wb.xlsx.writeBuffer();
-        });
-      }).then(buf => {
+        return JSZip.loadAsync(b64ToBuf(t.data), { createFolders: false });
+      }).then(zip => zip.file(SHEET).async('string').then(xml => {
+        zip.file(SHEET, fillSheet(xml, V), { createFolders: false });
+        return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      })).then(blob => {
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-        a.download = name; document.body.appendChild(a); a.click(); a.remove();
-        msg('<span class="muted">已下載，存到資料庫中…</span>');
-        return call('saveSheetFile', D.date, bufToB64(buf));
-      }).then(r => msg(`<span class="ok">已下載，也存到資料庫：${esc(r.path)}</span>`))
-        .catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
+        a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        msg('');
+      }).catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
         .then(() => { if (btn) btn.disabled = false; });
     };
     load();
