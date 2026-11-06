@@ -1242,23 +1242,36 @@
         [23, p => n(p) >= 40 && n(p) < 50], [24, p => n(p) >= 50]].forEach(([row, f]) =>
         everyone.filter(f).slice(0, 8).forEach((p, i) => { set(SLOT[i][0], row, p.num); set(SLOT[i][1], row, p.name); }));
 
-      // 救災任務編組（照 VBA 目前的邏輯）
-      const w = today.map(p => String(p.num));
-      set(3, 27, w[0]); set(3, 28, w[1]);
-      let x = 2;
-      if (w[2] && Number(w[2]) < 10) { set(3, 29, w[2]); x = 3; }
-      let Y = w.length - 1 - x;
-      for (let i = x; i < w.length; i++) if (w[i] === '53') { w[i] = ''; Y--; }
-      const take = v => { for (let i = x; i < w.length; i++) if (w[i] && w[i] === v) { w[i] = ''; return v; } return ''; };
-      const next = () => { for (let i = x; i < w.length; i++) if (w[i]) { const v = w[i]; w[i] = ''; return v; } return ''; };
-      set(6, 27, take(at(firstOf('值班'), 0)));       // 11 車駕駛＝08 時值班
-      V.R31 = take(at(firstOf('值班'), 14));            // 火警值班＝22 時值班
-      set(21, 27, take(at(firstOf('一救'), 14)));      // 91 車司機
-      set(23, 27, take(at(second('一救'), 14)));       // 91 車救護員
-      set(6, 28, next()); set(6, 29, next());           // 61 駕駛、特種車司機
-      set(9, 27, next()); set(12, 27, next()); set(15, 27, next());   // 11 車後座
-      Y -= 9;
-      if (Y > 0) { V.U31 = next(); Y--; if (Y > 0) set(9, 28, next()); }
+      // 救災任務編組（瑋哥 2026-11-06 訂的規則）：11 車 5 人、61／33 車各 3 人、91 車 2 人、火警值班、火場攝影，共 15 格；再多手動
+      const pool = onDuty.map(p => String(p.num));
+      const used = new Set();
+      const take = v => (v && pool.includes(String(v)) && !used.has(String(v)) ? (used.add(String(v)), String(v)) : '');
+      const cadres = pool.filter(v => Number(v) < 10);
+      set(3, 27, take(cadres[0]));                        // 帶隊官
+      set(3, 28, take(cadres[1]));                        // 61 副指揮官
+      set(3, 29, take(cadres[2]));                        // 33 副指揮官
+      V.R31 = take(at(firstOf('值班'), 14));               // 火警值班＝22 時值班
+      set(21, 27, take(at(firstOf('一救'), 14)));         // 91 車司機＝22 時一救第一位
+      set(23, 27, take(at(second('一救'), 14)));          // 91 車救護員＝22 時一救第二位
+      set(6, 27, take(at(firstOf('值班'), 0)));           // 11 車駕駛＝08 時值班
+      // 只有一位幹部：61 副指揮官照 11→21→31→41→12→22… 挑
+      if (!V.C28) {
+        const order = pool.filter(v => Number(v) >= 10 && Number(v) < 50 && !used.has(v))
+          .sort((a, b) => (a % 10) - (b % 10) || a - b);
+        set(3, 28, take(order[0]));
+      }
+      // 5 開頭的實務生／實習生優先放 61、33 第三人
+      const intern = () => take(pool.find(v => Number(v) >= 50 && !used.has(v)));
+      set(9, 28, intern()); set(9, 29, intern());
+      // 其他人照番號依序填
+      const next = () => take(pool.find(v => !used.has(v)));
+      [[6, 27], [6, 28], [6, 29], [9, 27], [12, 27], [15, 27], [9, 28], [3, 29], [9, 29]].forEach(([c, r]) => {
+        const k = COLS[c - 1] + r;
+        if (!V[k]) set(c, r, next());
+      });
+      V.U31 = next();                                     // 火場攝影
+      const left = pool.filter(v => !used.has(v));
+      if (left.length) warn.push('救災任務編組格子已滿，還有 ' + left.join('.') + ' 沒排進去，請手動處理');
 
       // 召回人員、備註
       // 召回：補休、休假（補、超、◎、△）沒有連休 4 天以上的是第二梯次；輪休、連休 4 天以上的是第三梯次；
