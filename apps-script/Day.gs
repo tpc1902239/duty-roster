@@ -96,7 +96,7 @@ function getDay(token, date) {
   const people = [], off = [];
   roster.here.forEach(p => {
     const u = unit[p.name] || {};
-    const row = { num: p.num, name: p.name, code: p.code, status: u.status || '在隊', limitHours: u.hours || [], limitKind: u.kind || '' };
+    const row = { num: p.num, name: p.name, code: p.code, role: p.role, status: u.status || '在隊', limitHours: u.hours || [], limitKind: u.kind || '' };
     (p.code === '' || names.indexOf(p.code) >= 0 || on.indexOf(p.code) >= 0 ? people : off).push(row);
   });
   let events = [], calendarError = '';
@@ -104,11 +104,13 @@ function getDay(token, date) {
   const saved = readDay_(y, m, d);
   return {
     date, weekday: roster.weekday, people,
-    off: off.map(p => ({ num: p.num, name: p.name, code: p.code })),
-    away: roster.away.map(p => ({ num: p.num, name: p.name })),
+    off: off.map(p => ({ num: p.num, name: p.name, code: p.code, role: p.role })),
+    away: roster.away.map(p => ({ num: p.num, name: p.name, role: p.role })),
     defs: shiftDefs_(), items: items_(), colors: colors_(), events, calendarError,
     night: lastNight_(date),
     saved, version: version_(sheetName_(y, m, '存檔')),
+    // 勤務表標題的「N 人」：編制人員裡在隊／算人力的人數；沒有編制人員就用月班表人數
+    headcount: Object.keys(unit).length ? Object.keys(unit).filter(k => ['在隊', '算人力'].indexOf(unit[k].status) >= 0).length : roster.here.length + roster.away.length,
     settings: {
       minStandby: settingNum_('備勤最低人數', 3), drillLess: settingNum_('駕訓時備勤減少', 2), maxRun: settingNum_('連續服勤上限', 8),
       leaderMax: settingNum_('小隊長每日上限時數', 4), restHours: settingNum_('每人休息時數', 2), restMax: settingNum_('休息上限', 4),
@@ -183,12 +185,14 @@ function saveBlocks_(y, m) {
 function readDay_(y, m, d) {
   const block = saveBlocks_(y, m)[d];
   if (!block) return null;
-  const out = { rows: [], people: [], memo: '', savedBy: '', savedAt: '' };
+  const out = { rows: [], people: [], memo: '', car: null, sub: null, savedBy: '', savedAt: '' };
   block.slice(1).forEach(r => {
     if (r[0] === '在隊' && r[1 + HOURS.length] === '') {
       out.people = r[1].split('、').filter(Boolean).map(x => { const [num, name, code] = x.split('='); return { num, name, code: code || '' }; });
     } else if (r[0] === '備註' && r[1 + HOURS.length] === '') {
       out.memo = r[1];
+    } else if ((r[0] === '車輛保養' || r[0] === '二替') && r[1 + HOURS.length] === '') {
+      out[r[0] === '車輛保養' ? 'car' : 'sub'] = r[1].split('.').filter(Boolean);
     } else if (r[0] === '存檔' && r[1 + HOURS.length] === '') {
       out.savedBy = r[1]; out.savedAt = r[2];
     } else if (r[0] !== '') {
@@ -232,6 +236,8 @@ function saveDay(token, date, day, version) {
       [r.type, r.place, r.text, r.code, r.category, r.item, r.ev].map(str_)))));
     rows.push(pad(['在隊', day.people.map(p => [p.num, p.name, p.code].map(str_).join('=')).join('、')]));
     rows.push(pad(['備註', str_(day.memo)]));
+    rows.push(pad(['車輛保養', (day.car || []).map(str_).filter(Boolean).join('.')]));
+    rows.push(pad(['二替', (day.sub || []).map(str_).filter(Boolean).join('.')]));
     rows.push(pad(['存檔', s.name || s.user, Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm')]));
     blocks[d] = rows;
     const all = [];
