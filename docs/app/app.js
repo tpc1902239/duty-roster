@@ -1194,7 +1194,10 @@
       const sub = nums($('#sub').value), car = nums($('#car').value);
       V.C10 = '為民服務暨深夜救護備二替人員:' + sub.join('.') + '  ' + lines(['備註']);
       const tr = (D.trains || []).slice(1).find(r => Number(r[0]) === dd);
-      V.C11 = (tr ? `(16-18時)救護訓練-${tr[2]}:${tr[4]}` : `(15-17時)體技能訓練:${at(firstOf('值班'), 14)}`) + lines(['搶救演練及訓練', 'C']);
+      // 救護訓練時間照「車輛／救護訓練」表的時間欄（16:00-18:00 → 16-18）
+      const tt = tr && String(tr[1]).match(/(\d{1,2})[:：]?(\d{2})?\s*[-~～－]\s*(\d{1,2})/);
+      const tTime = tt ? `${Number(tt[1])}-${Number(tt[3])}` : '16-18';
+      V.C11 = (tr ? `(${tTime}時)救護訓練-${tr[2]}:${tr[4]}` : `(15-17時)體技能訓練:${at(firstOf('值班'), 14)}`) + lines(['搶救演練及訓練', 'C']);
       const head = (D.cars || [])[0] || [], ci = head.findIndex((v, i) => i >= 3 && Number(v) === dd);
       V.C12 = '保養試車 ' + (ci < 0 ? '' : (D.cars || []).slice(1).filter(r => r[ci]).map(r => `${r[2]}(${r[ci]}) `).join('')) +
         car.map(x => ':' + x).join('') + '   (0800-0815)個人裝備測試保養';
@@ -1258,12 +1261,18 @@
       if (Y > 0) { V.U31 = next(); Y--; if (Y > 0) set(9, 28, next()); }
 
       // 召回人員、備註
-      V.P32 = `一、第一梯次(外勤、休息時間人員):${onDuty.map(p => p.num).join('.')}；第二梯次(補休、休假):${pick(c => ['補', '超', '◎', '△', '公', '婚', '喪'].includes(c)).join('.')}；第三梯次(輪休及連4日不等):${V.B15}。\n二、備勤包括救災、救護、在隊車輛保養、試車、試水、試梯、在隊體技能訓練及資料處理等。\n三、搶救演練及訓練：包括常訓、組合訓練、體技能訓練、救災演練及其他應變演習訓練。\n四、分、小隊長帶班服勤應於勤務表載明，專案勤務、特定勤務於「其他臨時勤務」內依序註明。`;
+      // 召回：補休、休假（補、超、◎、△）沒有連休 4 天以上的是第二梯次；輪休、連休 4 天以上的是第三梯次；
+      // 公假、婚假、喪假等其他假別都不召回，但算在連休天數裡（後端跨月份算好 run）
+      const RECALL = c => ['補', '超', '◎', '△'].includes(c);
+      const offs = D.off.slice().sort((a, b) => n(a) - n(b));
+      const tier2 = offs.filter(p => RECALL(p.code) && (p.run || 1) < 4).map(p => p.num);
+      const tier3 = offs.filter(p => String(p.code)[0] === '○' || (RECALL(p.code) && (p.run || 1) >= 4)).map(p => p.num);
+      V.P32 = `一、第一梯次(外勤、休息時間人員):${onDuty.map(p => p.num).join('.')}；第二梯次(補休、休假):${tier2.join('.')}；第三梯次(輪休及連4日不等):${tier3.join('.')}。\n二、備勤包括救災、救護、在隊車輛保養、試車、試水、試梯、在隊體技能訓練及資料處理等。\n三、搶救演練及訓練：包括常訓、組合訓練、體技能訓練、救災演練及其他應變演習訓練。\n四、分、小隊長帶班服勤應於勤務表載明，專案勤務、特定勤務於「其他臨時勤務」內依序註明。`;
       V.Q37 = '1.在勤幹部:' + today.filter(p => n(p) >= 1 && n(p) <= 5).map(p => (n(p) === 1 ? '分隊長' : '小隊長') + p.name + ' ').join('') + '\n' + $('#memo').value;
 
       // 畫出來
       const S = window.SHEET42, W = S.cols.reduce((a, b) => a + b, 0), H = S.rows.reduce((a, b) => a + b, 0);
-      const z = Math.min(1047 / W, 740 / H);           // A4 橫向、邊界 1cm／0.5cm
+      const z = Math.min(1510 / W, 1080 / H);          // 4.2 版是 A3 橫向、邊界 1cm／0.5cm
       const COLN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
       const byRow = {};
       S.cells.forEach(c => (byRow[c[0]] = byRow[c[0]] || []).push(c));
@@ -1273,12 +1282,46 @@
         const h = ha || (r === 13 || r === 15 || r === 32 ? 'l' : '');
         return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
       }).join('') + '</tr>').join('');
-      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sprint">列印</button> <button class="plain" id="sclose">關閉</button>
-          <span class="muted">版面照 4.2 版勤務表，內容是畫面上現在的排班（含還沒存檔的修改）。列印選 A4 橫向、邊界「預設」。</span>
+      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel（同時存到資料庫）</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
+          <span class="muted">內容是畫面上現在的排班（含還沒存檔的修改）。Excel 用 4.2 版的勤務表範本填好，直接開來列印最準（A3 橫向）。</span>
+          <div id="smsg"></div>
           ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
         <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
       document.getElementById('sheet').scrollTop = 0;
+      document.getElementById('sxlsx').onclick = () => excelOut(V);
     }).catch(e => alert(e.message));
+
+    // ---- 下載 Excel：資料庫的「勤務表範本.xlsx」填好內容，下載一份、雲端硬碟存一份 ----
+    const needExcel = () => (window.ExcelJS ? Promise.resolve() : new Promise((ok, bad) => {
+      const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+      s.onload = ok; s.onerror = () => bad(new Error('Excel 元件載入失敗，請檢查網路'));
+      document.head.appendChild(s);
+    }));
+    const b64ToBuf = b64 => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+    const bufToB64 = buf => { const u = new Uint8Array(buf); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(t); };
+    const excelOut = V => {
+      const msg = t => { const el = document.getElementById('smsg'); if (el) el.innerHTML = t; };
+      const btn = document.getElementById('sxlsx'); if (btn) btn.disabled = true;
+      msg('<span class="muted">產生 Excel 中…</span>');
+      const name = D.date + ' 勤務表.xlsx';
+      Promise.all([needExcel(), call('getSheetTemplate')]).then(([, t]) => {
+        if (!t.data) throw new Error(`資料庫還沒有勤務表範本：請把「${t.name}」放到系統帳號雲端硬碟的「${t.folder}」資料夾`);
+        const wb = new ExcelJS.Workbook();
+        return wb.xlsx.load(b64ToBuf(t.data)).then(() => {
+          const ws = wb.worksheets[0];
+          Object.keys(V).forEach(k => { const v = V[k]; ws.getCell(k).value = v === '' ? null : /^\d+$/.test(v) ? Number(v) : v; });
+          return wb.xlsx.writeBuffer();
+        });
+      }).then(buf => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        msg('<span class="muted">已下載，存到資料庫中…</span>');
+        return call('saveSheetFile', D.date, bufToB64(buf));
+      }).then(r => msg(`<span class="ok">已下載，也存到資料庫：${esc(r.path)}</span>`))
+        .catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
+        .then(() => { if (btn) btn.disabled = false; });
+    };
     load();
   }
 
