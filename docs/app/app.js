@@ -1297,6 +1297,14 @@
       s.onload = ok; s.onerror = () => bad(new Error('Excel 元件載入失敗，請檢查網路'));
       document.head.appendChild(s);
     }));
+    // 表頭兩條斜線：左上角 → 右下角、A／B 欄交界上緣 → 右下角
+    const headLines = () => {
+      const S = window.SHEET42, w = S.cols[0] + S.cols[1], h = S.rows[1], k = 4;
+      const cv = document.createElement('canvas'); cv.width = w * k; cv.height = h * k;
+      const g = cv.getContext('2d'); g.strokeStyle = '#000'; g.lineWidth = 1.2 * k;
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(w * k, h * k); g.moveTo(S.cols[0] * k, 0); g.lineTo(w * k, h * k); g.stroke();
+      return cv.toDataURL('image/png');
+    };
     const b64ToBuf = b64 => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
     const bufToB64 = buf => { const u = new Uint8Array(buf); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(t); };
     const excelOut = V => {
@@ -1310,6 +1318,9 @@
         return wb.xlsx.load(b64ToBuf(t.data)).then(() => {
           const ws = wb.worksheets[0];
           Object.keys(V).forEach(k => { const v = V[k]; ws.getCell(k).value = v === '' ? null : /^\d+$/.test(v) ? Number(v) : v; });
+          // 左上角表頭：4.2 版用兩條線（Excel 圖形）分出勤務／項目／編號／時間，範本讀進來會不見，這裡畫成透明圖片蓋回去
+          ws.getCell('A2').value = '勤務         項目    編號\n時間';
+          ws.addImage(wb.addImage({ base64: headLines(), extension: 'png' }), { tl: { col: 0, row: 1 }, br: { col: 2, row: 2 }, editAs: 'twoCell' });
           return wb.xlsx.writeBuffer();
         });
       }).then(buf => {
