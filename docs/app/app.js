@@ -1254,16 +1254,16 @@
       set(21, 27, take(at(firstOf('一救'), 14)));         // 91 車司機＝22 時一救第一位
       set(23, 27, take(at(second('一救'), 14)));          // 91 車救護員＝22 時一救第二位
       set(6, 27, take(at(firstOf('值班'), 0)));           // 11 車駕駛＝08 時值班
-      // 只有一位幹部：61 副指揮官照 11→21→31→41→12→22… 挑
-      if (!V.C28) {
-        const order = pool.filter(v => Number(v) >= 10 && Number(v) < 50 && !used.has(v))
-          .sort((a, b) => (a % 10) - (b % 10) || a - b);
-        set(3, 28, take(order[0]));
-      }
+      // 年資順序：各班越前面年資越深 → 11→21→31→41→12→22→32→42→13…
+      const senior = () => take(pool.filter(v => Number(v) >= 10 && Number(v) < 50 && !used.has(v))
+        .sort((a, b) => (a % 10) - (b % 10) || a - b)[0]);
+      if (!V.C28) set(3, 28, senior());                  // 只有一位幹部：61 副指揮官照年資
+      if (!V.F27) set(6, 27, senior());                  // 08 時值班的人已排別格：11 車駕駛照年資
+      set(6, 28, senior()); set(6, 29, senior());       // 61、33 駕駛照年資
       // 5 開頭的實務生／實習生優先放 61、33 第三人
       const intern = () => take(pool.find(v => Number(v) >= 50 && !used.has(v)));
       set(9, 28, intern()); set(9, 29, intern());
-      // 其他人照番號依序填
+      // 其餘照番號依序補上
       const next = () => take(pool.find(v => !used.has(v)));
       [[6, 27], [6, 28], [6, 29], [9, 27], [12, 27], [15, 27], [9, 28], [3, 29], [9, 29]].forEach(([c, r]) => {
         const k = COLS[c - 1] + r;
@@ -1282,6 +1282,30 @@
       const tier3 = offs.filter(p => String(p.code)[0] === '○' || (RECALL(p.code) && (p.run || 1) >= 4)).map(p => p.num);
       V.P32 = `一、第一梯次(外勤、休息時間人員):${onDuty.map(p => p.num).join('.')}；第二梯次(補休、休假):${tier2.join('.')}；第三梯次(輪休及連4日不等):${tier3.join('.')}。\n二、備勤包括救災、救護、在隊車輛保養、試車、試水、試梯、在隊體技能訓練及資料處理等。\n三、搶救演練及訓練：包括常訓、組合訓練、體技能訓練、救災演練及其他應變演習訓練。\n四、分、小隊長帶班服勤應於勤務表載明，專案勤務、特定勤務於「其他臨時勤務」內依序註明。`;
       V.Q37 = '1.在勤幹部:' + today.filter(p => n(p) >= 1 && n(p) <= 5).map(p => (n(p) === 1 ? '分隊長' : '小隊長') + p.name + ' ').join('') + '\n' + $('#memo').value;
+
+      // 排版：值班／救護／休息／外勤格子太長時，在「.」的地方換行，不讓番號被拆成兩半；
+      // 備註、搶救演練及訓練一行放不下的項目整個移到下一行。寬度用欄寬估（數字、英文算半個字）
+      const S42 = window.SHEET42, em = t => [...t].reduce((a, ch) => a + (/[\u0000-\u00ff]/.test(ch) ? 0.5 : 1), 0);
+      HOURS.forEach((x, h) => {
+        const cap = (S42.cols[h + 2] - 6) / 24;           // 13 號字一個字約 24px
+        for (let r = 3; r <= 9; r++) {
+          const k = COLS[h + 2] + r, parts = (V[k] || '').split('.');
+          if (!V[k] || em(V[k]) <= cap) continue;
+          const lines = [];
+          parts.forEach(p => { const last = lines.length - 1; if (last >= 0 && em(lines[last] + '.' + p) <= cap) lines[last] += '.' + p; else lines.push(p); });
+          V[k] = lines.join('\n');
+        }
+      });
+      const wrapLine = k => {
+        const cap = S42.cols.slice(2).reduce((a, b) => a + b, 0) / 26 - 2;   // 14 號字一個字約 26px，留一點邊
+        const items = V[k].split(/(?=\s{2}\()/);         // 每個項目以「兩個空白＋(」開頭
+        let out = '', line = '';
+        items.forEach(it => {
+          if (line && em(line + it) > cap) { out += line + '\n'; line = it.replace(/^\s+/, ''); } else line += it;
+        });
+        V[k] = out + line;
+      };
+      wrapLine('C10'); wrapLine('C11');
 
       // 畫出來
       const S = window.SHEET42, W = S.cols.reduce((a, b) => a + b, 0), H = S.rows.reduce((a, b) => a + b, 0);
