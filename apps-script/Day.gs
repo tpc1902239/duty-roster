@@ -9,29 +9,45 @@
 const ITEM_PLACES = ['防災宣導', '水源調查', '其他臨時勤務', '值班', '一救', '二救'];
 /** 文字寫到勤務表哪一欄（同 4.2 版 AA 欄：A 備註、B／C 搶救演練及訓練）。 */
 const ITEM_TEXT = ['備註', '搶救演練及訓練', ''];
-const ITEM_HEAD = ['名稱', '列名格式', '勤務表列', '文字欄', '大隊代碼', '勤務類別'];
+const ITEM_HEAD = ['名稱', '列名格式', '勤務表列', '文字欄', '大隊代碼', '勤務類別', '行事曆關鍵字'];
 
-/** 還沒有「外勤項目」分頁時用的預設值，照 4.2 版表單 4 的選項。列名格式的 {} 會換成排班時輸入的內容。 */
+/**
+ * 預設外勤項目，照 4.2 版表單 4 的選項，加上從 2026 年 1–11 月存檔區整理出來的行事曆關鍵字（對中約 93%）。
+ * 列名格式的 {} 會換成排班時輸入的內容。行事曆事項由上往下比對關鍵字，第一個對到的就是它的項目，都沒對到算「其他勤務」。
+ */
 const ITEM_DEFAULTS = [
-  ['水源', '水源第{}梯', '水源調查', '備註', 'F', '水源'],
-  ['駕訓', '', '其他臨時勤務', '搶救演練及訓練', 'L', '駕訓'],
-  ['大隊送公文', '', '其他臨時勤務', '備註', 'P', '公文'],
-  ['消防查察', '', '防災宣導', '備註', 'P', '查察'],
-  ['瓦斯路邊攔查', '', '防災宣導', '備註', 'N', '查察'],
-  ['訓練', '{}', '其他臨時勤務', '搶救演練及訓練', 'L', '訓練'],
-  ['宣導', '{}', '防災宣導', '備註', 'G', '宣導'],
-  ['開會', '{}', '其他臨時勤務', '備註', 'P', '開會'],
-  ['住警器安裝', '', '其他臨時勤務', '備註', 'G', '宣導'],
-  ['其他勤務', '{}', '其他臨時勤務', '備註', 'P', '其他'],
-  ['第二位值班', '', '值班', '', 'D', '值班'],
-  ['第三位91', '', '一救', '', 'E', '救護'],
-  ['第三位92', '', '二救', '', 'E', '救護'],
+  ['第二位值班', '', '值班', '', 'D', '值班', '第二位值班'],
+  ['第三位91', '', '一救', '', 'E', '救護', '第三位91'],
+  ['第三位92', '', '二救', '', 'E', '救護', '第三位92'],
+  ['開會', '{}', '其他臨時勤務', '備註', 'P', '開會', '會議、會報、委員會、說明會、協調會、座談'],
+  ['水源', '水源第{}梯', '水源調查', '備註', 'F', '水源', '水源'],
+  ['大車駕訓', '{}', '其他臨時勤務', '搶救演練及訓練', 'L', '訓練', '大貨車、大車'],
+  ['駕訓', '', '其他臨時勤務', '搶救演練及訓練', 'L', '駕訓', '駕訓'],
+  ['瓦斯路邊攔查', '', '防災宣導', '備註', 'N', '查察', '路邊攔查'],
+  ['住警器安裝', '', '其他臨時勤務', '備註', 'G', '宣導', '住警器'],
+  ['消防查察', '', '防災宣導', '備註', 'P', '查察', '查察'],
+  ['婦宣', '{}', '其他臨時勤務', '備註', 'P', '其他', '婦宣'],
+  ['宣導', '{}', '防災宣導', '備註', 'G', '宣導', '宣導'],
+  ['公墓巡邏', '', '其他臨時勤務', '備註', 'P', '其他', '公墓、墓地'],
+  ['演練', '{}', '其他臨時勤務', '備註', 'P', '演練', '演練'],
+  ['訓練', '{}', '其他臨時勤務', '搶救演練及訓練', 'L', '訓練', '訓練、複訓、常訓、定訓、組訓、集訓、認證、術科、研習、講習、TECC、CIT'],
+  ['大隊送公文', '', '其他臨時勤務', '備註', 'P', '公文', '公文'],
+  ['其他勤務', '{}', '其他臨時勤務', '備註', 'P', '其他', ''],
 ];
 
 function items_() {
-  const toItem = r => ({ name: str_(r[0]), label: str_(r[1]), place: str_(r[2]), text: str_(r[3]), code: str_(r[4]), category: str_(r[5]) });
-  if (!SpreadsheetApp.getActive().getSheetByName('外勤項目')) return ITEM_DEFAULTS.map(toItem);
-  return rows_('外勤項目').map(r => toItem(ITEM_HEAD.map(h => r[h]))).filter(x => x.name);
+  const toItem = r => ({ name: str_(r[0]), label: str_(r[1]), place: str_(r[2]), text: str_(r[3]), code: str_(r[4]), category: str_(r[5]), keywords: str_(r[6]) });
+  const dflt = ITEM_DEFAULTS.map(toItem);
+  const sh = SpreadsheetApp.getActive().getSheetByName('外勤項目');
+  if (!sh) return dflt;
+  const saved = rows_('外勤項目').map(r => toItem(ITEM_HEAD.map(h => r[h]))).filter(x => x.name);
+  if ((sh.getDataRange().getValues()[0] || []).map(str_).indexOf('行事曆關鍵字') >= 0) return saved;
+  // 舊的設定還沒有關鍵字欄：照預設的順序排、補上關鍵字和新的預設項目，自己加的項目放在「其他勤務」前面
+  const byName = Object.fromEntries(saved.map(x => [x.name, x]));
+  const out = dflt.map(d => (byName[d.name] ? Object.assign({}, byName[d.name], { keywords: d.keywords }) : d));
+  const extra = saved.filter(x => !dflt.some(d => d.name === x.name));
+  out.splice(out.length - 1, 0, ...extra);
+  return out;
 }
 
 function getItems(token) {
@@ -43,7 +59,7 @@ function saveItems(token, items, version) {
   const s = need_(token, '排班');
   const seen = {};
   items.forEach(x => {
-    ['name', 'label', 'place', 'text', 'code', 'category'].forEach(k => { x[k] = str_(x[k]); });
+    ['name', 'label', 'place', 'text', 'code', 'category', 'keywords'].forEach(k => { x[k] = str_(x[k]); });
     if (!x.name) throw new Error('名稱不能空白');
     if (seen[x.name]) throw new Error('名稱重複：' + x.name);
     seen[x.name] = true;
@@ -53,7 +69,7 @@ function saveItems(token, items, version) {
   return guarded_('外勤項目', version, () => {
     const ss = SpreadsheetApp.getActive();
     const sh = ss.getSheetByName('外勤項目') || ss.insertSheet('外勤項目');
-    const values = [ITEM_HEAD].concat(items.map(x => [x.name, x.label, x.place, x.text, x.code, x.category]));
+    const values = [ITEM_HEAD].concat(items.map(x => [x.name, x.label, x.place, x.text, x.code, x.category, x.keywords]));
     sh.clear();
     sh.getRange(1, 1, values.length, ITEM_HEAD.length).setNumberFormat('@').setValues(values);
     sh.getRange(1, 1, 1, ITEM_HEAD.length).setFontWeight('bold').setBackground('#ddebf7');
