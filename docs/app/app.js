@@ -1242,23 +1242,36 @@
         [23, p => n(p) >= 40 && n(p) < 50], [24, p => n(p) >= 50]].forEach(([row, f]) =>
         everyone.filter(f).slice(0, 8).forEach((p, i) => { set(SLOT[i][0], row, p.num); set(SLOT[i][1], row, p.name); }));
 
-      // 救災任務編組（照 VBA 目前的邏輯）
-      const w = today.map(p => String(p.num));
-      set(3, 27, w[0]); set(3, 28, w[1]);
-      let x = 2;
-      if (w[2] && Number(w[2]) < 10) { set(3, 29, w[2]); x = 3; }
-      let Y = w.length - 1 - x;
-      for (let i = x; i < w.length; i++) if (w[i] === '53') { w[i] = ''; Y--; }
-      const take = v => { for (let i = x; i < w.length; i++) if (w[i] && w[i] === v) { w[i] = ''; return v; } return ''; };
-      const next = () => { for (let i = x; i < w.length; i++) if (w[i]) { const v = w[i]; w[i] = ''; return v; } return ''; };
-      set(6, 27, take(at(firstOf('值班'), 0)));       // 11 車駕駛＝08 時值班
-      V.R31 = take(at(firstOf('值班'), 14));            // 火警值班＝22 時值班
-      set(21, 27, take(at(firstOf('一救'), 14)));      // 91 車司機
-      set(23, 27, take(at(second('一救'), 14)));       // 91 車救護員
-      set(6, 28, next()); set(6, 29, next());           // 61 駕駛、特種車司機
-      set(9, 27, next()); set(12, 27, next()); set(15, 27, next());   // 11 車後座
-      Y -= 9;
-      if (Y > 0) { V.U31 = next(); Y--; if (Y > 0) set(9, 28, next()); }
+      // 救災任務編組（瑋哥 2026-11-06 訂的規則）：11 車 5 人、61／33 車各 3 人、91 車 2 人、火警值班、火場攝影，共 15 格；再多手動
+      const pool = onDuty.map(p => String(p.num));
+      const used = new Set();
+      const take = v => (v && pool.includes(String(v)) && !used.has(String(v)) ? (used.add(String(v)), String(v)) : '');
+      const cadres = pool.filter(v => Number(v) < 10);
+      set(3, 27, take(cadres[0]));                        // 帶隊官
+      set(3, 28, take(cadres[1]));                        // 61 副指揮官
+      set(3, 29, take(cadres[2]));                        // 33 副指揮官
+      V.R31 = take(at(firstOf('值班'), 14));               // 火警值班＝22 時值班
+      set(21, 27, take(at(firstOf('一救'), 14)));         // 91 車司機＝22 時一救第一位
+      set(23, 27, take(at(second('一救'), 14)));          // 91 車救護員＝22 時一救第二位
+      set(6, 27, take(at(firstOf('值班'), 0)));           // 11 車駕駛＝08 時值班
+      // 年資順序：各班越前面年資越深 → 11→21→31→41→12→22→32→42→13…
+      const senior = () => take(pool.filter(v => Number(v) >= 10 && Number(v) < 50 && !used.has(v))
+        .sort((a, b) => (a % 10) - (b % 10) || a - b)[0]);
+      if (!V.C28) set(3, 28, senior());                  // 只有一位幹部：61 副指揮官照年資
+      if (!V.F27) set(6, 27, senior());                  // 08 時值班的人已排別格：11 車駕駛照年資
+      set(6, 28, senior()); set(6, 29, senior());       // 61、33 駕駛照年資
+      // 5 開頭的實務生／實習生優先放 61、33 第三人
+      const intern = () => take(pool.find(v => Number(v) >= 50 && !used.has(v)));
+      set(9, 28, intern()); set(9, 29, intern());
+      // 其餘照番號依序補上
+      const next = () => take(pool.find(v => !used.has(v)));
+      [[6, 27], [6, 28], [6, 29], [9, 27], [12, 27], [15, 27], [9, 28], [3, 29], [9, 29]].forEach(([c, r]) => {
+        const k = COLS[c - 1] + r;
+        if (!V[k]) set(c, r, next());
+      });
+      V.U31 = next();                                     // 火場攝影
+      const left = pool.filter(v => !used.has(v));
+      if (left.length) warn.push('救災任務編組格子已滿，還有 ' + left.join('.') + ' 沒排進去，請手動處理');
 
       // 召回人員、備註
       // 召回：補休、休假（補、超、◎、△）沒有連休 4 天以上的是第二梯次；輪休、連休 4 天以上的是第三梯次；
@@ -1269,6 +1282,30 @@
       const tier3 = offs.filter(p => String(p.code)[0] === '○' || (RECALL(p.code) && (p.run || 1) >= 4)).map(p => p.num);
       V.P32 = `一、第一梯次(外勤、休息時間人員):${onDuty.map(p => p.num).join('.')}；第二梯次(補休、休假):${tier2.join('.')}；第三梯次(輪休及連4日不等):${tier3.join('.')}。\n二、備勤包括救災、救護、在隊車輛保養、試車、試水、試梯、在隊體技能訓練及資料處理等。\n三、搶救演練及訓練：包括常訓、組合訓練、體技能訓練、救災演練及其他應變演習訓練。\n四、分、小隊長帶班服勤應於勤務表載明，專案勤務、特定勤務於「其他臨時勤務」內依序註明。`;
       V.Q37 = '1.在勤幹部:' + today.filter(p => n(p) >= 1 && n(p) <= 5).map(p => (n(p) === 1 ? '分隊長' : '小隊長') + p.name + ' ').join('') + '\n' + $('#memo').value;
+
+      // 排版：值班／救護／休息／外勤格子太長時，在「.」的地方換行，不讓番號被拆成兩半；
+      // 備註、搶救演練及訓練一行放不下的項目整個移到下一行。寬度用欄寬估（數字、英文算半個字）
+      const S42 = window.SHEET42, em = t => [...t].reduce((a, ch) => a + (/[\u0000-\u00ff]/.test(ch) ? 0.5 : 1), 0);
+      HOURS.forEach((x, h) => {
+        const cap = (S42.cols[h + 2] - 6) / 24;           // 13 號字一個字約 24px
+        for (let r = 3; r <= 9; r++) {
+          const k = COLS[h + 2] + r, parts = (V[k] || '').split('.');
+          if (!V[k] || em(V[k]) <= cap) continue;
+          const lines = [];
+          parts.forEach(p => { const last = lines.length - 1; if (last >= 0 && em(lines[last] + '.' + p) <= cap) lines[last] += '.' + p; else lines.push(p); });
+          V[k] = lines.join('\n');
+        }
+      });
+      const wrapLine = k => {
+        const cap = S42.cols.slice(2).reduce((a, b) => a + b, 0) / 26 - 2;   // 14 號字一個字約 26px，留一點邊
+        const items = V[k].split(/(?=\s{2}\()/);         // 每個項目以「兩個空白＋(」開頭
+        let out = '', line = '';
+        items.forEach(it => {
+          if (line && em(line + it) > cap) { out += line + '\n'; line = it.replace(/^\s+/, ''); } else line += it;
+        });
+        V[k] = out + line;
+      };
+      wrapLine('C10'); wrapLine('C11');
 
       // 畫出來
       const S = window.SHEET42, W = S.cols.reduce((a, b) => a + b, 0), H = S.rows.reduce((a, b) => a + b, 0);
