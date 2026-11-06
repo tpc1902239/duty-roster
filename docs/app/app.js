@@ -958,16 +958,6 @@
         if (late.length && Number(n) >= 10 && !restDef.has(p.code)) add('提醒', `${n} ${p.name} 休息排在 ${hoursText(late)}（22–06 原則上只有幹部）`);
         const extra = range(0, 24).filter(h => rows.some(r => duty(r) && r.cells[h] === n && !own.has(r.type + h)));
         if (Number(n) === 1 && extra.length) add('提醒', `分隊長有排班：${hoursText(extra)}`);
-        // 編制人員的限排時間、限排勤務
-        if (p.limitHours.length) {
-          const bad = extra.filter(h => !p.limitHours.includes(HOURS[h]));
-          if (bad.length) add('提醒', `${n} ${p.name} 限排時間以外有排：${hoursText(bad)}`);
-        }
-        if (p.limitKind) {
-          const okType = p.limitKind === '救護' ? ['一救', '二救'] : [p.limitKind];
-          const bad = rows.filter(r => duty(r) && r.cells.includes(n) && !okType.includes(r.type) && !okType.includes(r.place)).map(r => r.label);
-          if (bad.length) add('提醒', `${n} ${p.name} 限排${p.limitKind}，但排了：${[...new Set(bad)].join('、')}`);
-        }
       });
       const low = range(0, 24).filter(h => standby(h).length < minAt(h));
       if (low.length) add('提醒', `備勤人數低於下限：${low.map(h => HOURS[h] + '（' + standby(h).length + '/' + minAt(h) + '）').join('、')}`);
@@ -1113,7 +1103,8 @@
           rows = sortRows(rows);
         }
       }
-      $('#memo').value = mode === 'draft' ? draft.memo : mode === 'saved' ? d.saved.memo : (d.prevMemo || '');   // 新的一天帶入前一天的備註
+      // 還沒存檔的日子（新的一天、或草稿裡備註是空的）帶入最近一天存檔的備註
+      $('#memo').value = mode === 'saved' ? d.saved.memo : (mode === 'draft' && draft.memo) || (d.saved ? '' : d.prevMemo || '');
       // 車輛保養＝值宿的人、二替＝A 班（4.3 版起直接帶入）；存過的照存檔
       const byKind = test => d.people.filter(p => { const df = defOf(p.code); return df && test(df); }).sort((a, b) => a.code.localeCompare(b.code)).map(p => String(p.num));
       const pick = (k, dflt) => (mode === 'draft' && draft[k] ? draft[k] : mode === 'saved' && d.saved[k] ? d.saved[k] : dflt);

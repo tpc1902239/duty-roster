@@ -141,10 +141,13 @@ function yesterday_(date, names) {
   return out;
 }
 
-/** 前一天存檔的備註，新的一天帶入用。 */
+/** 最近一天存過檔的備註（往前找 31 天，前一天沒存檔也帶得到），新的一天帶入用。 */
 function prevMemo_(date) {
-  const [y, m, d] = addDays_(date, -1).split('-').map(Number);
-  try { const s = readDay_(y, m, d); return s ? s.memo : ''; } catch (e) { return ''; }
+  for (let k = 1; k <= 31; k++) {
+    const [y, m, d] = addDays_(date, -k).split('-').map(Number);
+    try { const s = readDay_(y, m, d); if (s) return s.memo; } catch (e) { /* 那個月還沒有存檔 */ }
+  }
+  return '';
 }
 
 // ---------- 存檔 ----------
