@@ -104,7 +104,7 @@ function getDay(token, date) {
   const saved = readDay_(y, m, d);
   return {
     date, weekday: roster.weekday, people,
-    off: off.map(p => ({ num: p.num, name: p.name, code: p.code, role: p.role })),
+    off: (runs => off.map(p => ({ num: p.num, name: p.name, code: p.code, role: p.role, run: runs[p.name] })))(leaveRuns_(date, off.map(p => p.name), names, on)),
     away: roster.away.map(p => ({ num: p.num, name: p.name, role: p.role })),
     defs: shiftDefs_(), items: items_(), colors: colors_(), events, calendarError,
     night: lastNight_(date),
@@ -289,4 +289,61 @@ function saveColors(token, colors, version) {
     log_(s.user, '排班區顏色', Object.keys(colors).length + ' 項');
     return { count: Object.keys(colors).length };
   });
+}
+
+// ---------- 召回：連續放假天數（可以跨月） ----------
+
+/**
+ * 每個人含今天在內、連續不在隊（月班表是假別代號）幾天：{姓名: 天數}。
+ * 班別代號、在隊代碼（外）、空白都算在隊；前後月份沒有月班表就停在那裡。
+ */
+function leaveRuns_(date, names, work, on) {
+  const codeOf = (ds, name) => {
+    const [y, m, d] = ds.split('-').map(Number);
+    let mo;
+    try { mo = month_(y, m); } catch (e) { return null; }
+    const day = mo.days[d], i = mo.people.findIndex(p => p.name === name);
+    if (!day || i < 0 || day.away[i]) return null;
+    return str_(day.codes[i]);
+  };
+  const isOff = c => c !== null && c !== '' && work.indexOf(c) < 0 && on.indexOf(c) < 0;
+  const out = {};
+  names.forEach(name => {
+    let n = 1;
+    for (const dir of [-1, 1]) for (let k = 1; k <= 15 && isOff(codeOf(addDays_(date, dir * k), name)); k++) n++;
+    out[name] = n;
+  });
+  return out;
+}
+
+// ---------- 勤務表 Excel：範本和存檔放在雲端硬碟「勤務表存檔」資料夾 ----------
+
+const SHEET_FOLDER = '勤務表存檔';
+const SHEET_TEMPLATE = '勤務表範本.xlsx';
+
+function sheetFolder_() {
+  const it = DriveApp.getFoldersByName(SHEET_FOLDER);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(SHEET_FOLDER);
+}
+
+/** 勤務表範本（base64）。還沒放範本就回傳 null。 */
+function getSheetTemplate(token) {
+  need_(token);
+  const it = sheetFolder_().getFilesByName(SHEET_TEMPLATE);
+  if (!it.hasNext()) return { data: null, folder: SHEET_FOLDER, name: SHEET_TEMPLATE };
+  return { data: Utilities.base64Encode(it.next().getBlob().getBytes()), name: SHEET_TEMPLATE };
+}
+
+/** 把填好的勤務表存進「勤務表存檔／YYYY-MM／YYYY-MM-DD 勤務表.xlsx」，同一天重存會取代舊檔。 */
+function saveSheetFile(token, date, data) {
+  const s = need_(token, '排班');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期格式不對');
+  const root = sheetFolder_(), ym = date.slice(0, 7);
+  const it = root.getFoldersByName(ym), folder = it.hasNext() ? it.next() : root.createFolder(ym);
+  const name = date + ' 勤務表.xlsx';
+  const old = folder.getFilesByName(name);
+  while (old.hasNext()) old.next().setTrashed(true);
+  const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(data), MimeType.MICROSOFT_EXCEL, name));
+  log_(s.user, '輸出勤務表', date);
+  return { url: file.getUrl(), path: SHEET_FOLDER + '/' + ym + '/' + name };
 }

@@ -1148,76 +1148,179 @@
       return el;
     };
 
-    // ---- 輸出勤務表（同 4.2 版 OutPutWork） ----
-    const showSheet = () => {
+    // ---- 輸出勤務表：版面照 4.2 版「勤務表」工作表（sheet42.js），內容照 VBA OutPutWork ----
+    const need42 = () => (window.SHEET42 ? Promise.resolve() : new Promise((ok, bad) => {
+      const s = document.createElement('script'); s.src = 'sheet42.js?v=' + Date.now();
+      s.onload = ok; s.onerror = () => bad(new Error('勤務表版面載入失敗，請檢查網路'));
+      document.head.appendChild(s);
+    }));
+    const showSheet = () => need42().then(() => {
+      const V = {};                                  // 儲存格位址 → 內容
       const [y, m, dd] = D.date.split('-').map(Number);
       const wd = WEEK[new Date(D.date + 'T12:00:00+08:00').getDay()];
-      const at = (test, h) => rows.filter(test).map(r => r.cells[h]).filter(Boolean).join('.');
-      const grid = [
-        ['值班', r => groupOf(r) === '值班'], ['緊急救護91', r => groupOf(r) === '一救'], ['緊急救護92', r => groupOf(r) === '二救'],
-        ['休息時間', r => r.type === '休息'], ['防災宣導', r => r.type === '外勤' && r.place === '防災宣導'],
-        ['水源調查', r => r.type === '外勤' && r.place === '水源調查'], ['其他臨時勤務', r => r.type === '外勤' && r.place === '其他臨時勤務'],
-      ];
-      // 一列外勤的時段：第一個有排的小時到之後第一個空格（同 4.2）
-      const span = r => { const a = r.cells.findIndex(Boolean); if (a < 0) return null; let b = a; while (b < 24 && r.cells[b]) b++; return [a, b]; };
-      const lines = text => {
-        const groups = [];
-        rows.filter(r => r.type === '外勤' && r.text === text).forEach(r => {
-          const sp = span(r); if (!sp) return;
-          const g = groups.find(x => x.label === r.label && x.a === sp[0] && x.b === sp[1]);
-          if (g) g.who.push(r.cells[sp[0]]); else groups.push({ label: r.label, a: sp[0], b: sp[1], who: [r.cells[sp[0]]] });
+      const n = p => Number(p.num);
+      const join = a => a.filter(x => x !== '' && x != null).join('.');
+      const COLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const set = (col, row, v) => { V[COLS[col - 1] + row] = v == null ? '' : String(v); };
+      const at = (r, h) => (r ? r.cells[h] || '' : '');
+      const firstOf = t => rows.find(r => r.type === t);
+      const second = t => rows.filter(r => r.type === t)[1];
+
+      // 標題（A1）
+      V.A1 = `臺 中 市 政 府 消 防 局 第 三 救 災 救 護 大 隊 霧 峰 分 隊 ${D.headcount} 人 勤 務 分 配 表    日期: ${y - 1911} 年 ${m} 月 ${dd} 日 星期${wd}       主管:`;
+
+      // 值班、91、92、休息、三種外勤（第 3–9 列）
+      HOURS.forEach((x, h) => {
+        const col = h + 3;
+        set(col, 3, join(rows.filter(r => groupOf(r) === '值班').map(r => at(r, h))));
+        set(col, 4, join(rows.filter(r => groupOf(r) === '一救').map(r => at(r, h))));
+        set(col, 5, join(rows.filter(r => groupOf(r) === '二救').map(r => at(r, h))));
+        set(col, 6, join(rows.filter(r => r.type === '休息').map(r => at(r, h))));
+        ['防災宣導', '水源調查', '其他臨時勤務'].forEach((place, i) =>
+          set(col, 7 + i, join(rows.filter(r => r.type === '外勤' && r.place === place).map(r => at(r, h)))));
+      });
+
+      // 備註、搶救演練及訓練（同 VBA：同一個勤務、同一個開始時間的人用「.」接在後面）
+      const lines = texts => {
+        let out = '', last = null;
+        rows.filter(r => r.type === '外勤' && texts.includes(r.text)).forEach(r => {
+          const a = r.cells.findIndex(Boolean); if (a < 0) return;
+          let b = a; while (b < 24 && r.cells[b]) b++;
+          if (last && last.label === r.label && last.a === a) out += '.' + r.cells[a];
+          else { out += `  (${HOURS[a]}-${b >= 24 ? HOURS[23] : HOURS[b]}時)${r.label}:${r.cells[a]}`; last = { label: r.label, a }; }
         });
-        return groups.map(g => `  (${HOURS[g.a]}-${hourLabel(g.b)}時)${g.label}:${g.who.join('.')}`).join('');
+        return out;
       };
       const sub = nums($('#sub').value), car = nums($('#car').value);
-      const note = '為民服務暨深夜救護備二替人員:' + sub.join('.') + ' ' + lines('備註');
+      V.C10 = '為民服務暨深夜救護備二替人員:' + sub.join('.') + '  ' + lines(['備註']);
       const tr = (D.trains || []).slice(1).find(r => Number(r[0]) === dd);
-      const tTime = tr ? String(tr[1]).replace(/(\d{1,2})(:\d{2})?\s*[-~～]\s*(\d{1,2})(:\d{2})?/, (x, a, b, c) => `${Number(a)}-${Number(c)}`) : '';
-      const nightDuty = (rows.find(r => r.type === '值班') || { cells: [] }).cells[14] || car[0] || '';
-      const train = (tr ? `(${tTime}時)救護訓練-${String(tr[2]).replace(/\s+/g, ' ')}:${tr[4] || ''}` : `(15-17時)體技能訓練:${nightDuty}`) + lines('搶救演練及訓練');
-      const head = (D.cars || [])[0] || [], col = head.findIndex((v, i) => i >= 3 && Number(v) === dd);
-      const cars = col < 0 ? '' : (D.cars || []).slice(1).filter(r => r[col]).map(r => `${r[2]}(${r[col]}) `).join('');
-      const keep = '保養試車 ' + cars + car.map(n => ':' + n).join('') + '   (0800-0815)個人裝備測試保養';
-      const onDuty = D.people.filter(p => p.code !== '外' && p.code !== '離');
-      const cnt = t => onDuty.filter(p => (p.role || '').includes(t)).length;
-      const standbyTxt = onDuty.map(p => p.num).join('.') + ` 合計${onDuty.length}人(含實務生${cnt('實務生')}人、實習生${cnt('實習生')}人)，除上列各項勤務外餘日備勤`;
-      // 假別名單（月班表代號）
-      const LEAVE = [['輪休', c => c[0] === '○' || c === '輪'], ['特休', c => c === '△'], ['休假', c => c === '◎'], ['補休', c => c === '補'], ['超補', c => c === '超'],
-        ['申請離隊', c => c === '離'], ['公假', c => c === '公'], ['婚假', c => c === '婚'], ['喪假', c => c === '喪']];
-      const leave = LEAVE.map(([name, f]) => [name, D.off.filter(p => f(p.code)).map(p => p.num)]);
-      const other = D.off.filter(p => !LEAVE.some(([, f]) => f(p.code)));
-      [...new Set(other.map(p => p.code))].forEach(c => leave.push([c, other.filter(p => p.code === c).map(p => p.num)]));
-      leave.push(['外宿', D.people.filter(p => p.code === '外').map(p => p.num)]);
-      const everyone = D.people.concat(D.off, D.away).sort((a, b) => a.num - b.num);
-      const team = [['主管及小隊長', p => p.num < 10], ['第一班', p => p.num >= 10 && p.num < 20], ['第二班', p => p.num >= 20 && p.num < 30],
-        ['第三班', p => p.num >= 30 && p.num < 40], ['第四班', p => p.num >= 40 && p.num < 50], ['實務生及替代役', p => p.num >= 50]];
-      const cadre = D.people.filter(p => p.num < 10).map(p => (Number(p.num) === 1 ? '分隊長' : '小隊長') + p.name).join(' ');
-      const td = s2 => `<td>${esc(s2)}</td>`;
-      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sprint">列印</button> <button class="plain" id="sclose">關閉</button>
-          <span class="muted">內容是畫面上現在的排班（含還沒存檔的修改）。列印請選 A4 橫向。</span></div>
-        <div class="sheet">
-        <div class="stitle">臺中市政府消防局第三救災救護大隊霧峰分隊 ${D.headcount} 人勤務分配表　　日期：${y - 1911} 年 ${m} 月 ${dd} 日 星期${wd}　　主管：</div>
-        <table class="st"><tr><th>勤務項目</th>${HOURS.map((h, i) => `<th>${h}-${hourLabel(i + 1)}</th>`).join('')}</tr>
-          ${grid.map(([name, f]) => `<tr><th>${name}</th>${HOURS.map((x, h) => td(at(f, h))).join('')}</tr>`).join('')}
-          <tr><th>備註</th><td colspan="24" class="l">${esc(note)}</td></tr>
-          <tr><th>搶救演練及訓練</th><td colspan="24" class="l">${esc(train)}</td></tr>
-          <tr><th>裝備器材保養</th><td colspan="24" class="l">${esc(keep)}</td></tr>
-          <tr><th>備勤人員</th><td colspan="24" class="l">${esc(standbyTxt)}</td></tr>
-          <tr><th>召回人員</th><td colspan="24" class="l">第一梯次：外勤、休息時間人員；第二梯次：補休、休假；第三梯次：輪休及連 4 日不在隊</td></tr>
-        </table>
-        <table class="st leave"><tr>${leave.map(([n]) => `<th>${esc(n)}</th>`).join('')}</tr><tr>${leave.map(([, l]) => td(l.join('.'))).join('')}</tr></table>
-        <div class="srow">
-          <table class="st team">${team.map(([n, f]) => `<tr><th>${n}</th>${everyone.filter(f).map(p => `<td>${esc(p.num)}</td><td>${esc(p.name)}</td>`).join('')}</tr>`).join('')}</table>
-        </div>
-        <div class="srow">
-          <table class="st task"><tr><th colspan="9">救災任務編組（輸出模組下一步討論，先留白可手寫）</th></tr>
-            <tr><th>出動車輛</th>${'<th>編號</th><th>任務</th>'.repeat(4)}</tr>${'<tr><td>&nbsp;</td>' + '<td></td>'.repeat(8) + '</tr>'}${'<tr><td>&nbsp;</td>' + '<td></td>'.repeat(8) + '</tr>'}${'<tr><td>&nbsp;</td>' + '<td></td>'.repeat(8) + '</tr>'}</table>
-          <table class="st memo"><tr><th>備註</th><td class="l">1.在勤幹部：${esc(cadre)}<br>${esc($('#memo').value).replace(/\n/g, '<br>')}</td><th>核閱</th><td style="width:80px"></td></tr></table>
-        </div>
-        <table class="st chg"><tr><th colspan="5">勤務變更紀錄表</th></tr><tr><th>服勤者姓名</th><th>原定勤務（時間／項目）</th><th>變更勤務（時間／項目）</th><th>變更原因</th><th>主管核章</th></tr>
-          ${'<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>'.repeat(3)}</table>
-        </div>`;
+      // 救護訓練時間照「車輛／救護訓練」表的時間欄（16:00-18:00 → 16-18）
+      const tt = tr && String(tr[1]).match(/(\d{1,2})[:：]?(\d{2})?\s*[-~～－]\s*(\d{1,2})/);
+      const tTime = tt ? `${Number(tt[1])}-${Number(tt[3])}` : '16-18';
+      V.C11 = (tr ? `(${tTime}時)救護訓練-${tr[2]}:${tr[4]}` : `(15-17時)體技能訓練:${at(firstOf('值班'), 14)}`) + lines(['搶救演練及訓練', 'C']);
+      const head = (D.cars || [])[0] || [], ci = head.findIndex((v, i) => i >= 3 && Number(v) === dd);
+      V.C12 = '保養試車 ' + (ci < 0 ? '' : (D.cars || []).slice(1).filter(r => r[ci]).map(r => `${r[2]}(${r[ci]}) `).join('')) +
+        car.map(x => ':' + x).join('') + '   (0800-0815)個人裝備測試保養';
+
+      // 備勤人員（B13）：今天有班的人，扣掉「離」「外」
+      const today = D.people.slice().sort((a, b) => n(a) - n(b));
+      const onDuty = today.filter(p => p.code !== '離' && p.code !== '外');
+      const isRole = (p, t, nums2) => (p.role || '').includes(t) || nums2.includes(n(p));
+      V.B13 = onDuty.map(p => p.num).join('.') + ` 合計${onDuty.length}人(含實務生${onDuty.filter(p => isRole(p, '實務生', [51, 52])).length}人、實習生${onDuty.filter(p => isRole(p, '實習生', [53])).length}人)，除上列各項勤務外餘日備勤`;
+
+      // 假別（同 VBA：看月班表當天的代號）
+      const all = D.people.concat(D.off).sort((a, b) => n(a) - n(b));
+      const pick = f => all.filter(p => f(String(p.code || ''))).map(p => p.num);
+      V.B15 = pick(c => c[0] === '○').join('.');       // 輪休
+      V.M15 = pick(c => c === '△').join('.');           // 特休
+      V.P15 = pick(c => c === '◎').join('.');           // 休假
+      V.W14 = pick(c => c === '補').join('.');           // 補休
+      V.W13 = pick(c => c === '超').join('.');           // 超補
+      V.H15 = pick(c => c === '離').join('.');           // 申請離隊
+      const pub = pick(c => c === '公');                 // 公假：最多兩格
+      V.W15 = pub[0] || '';
+      // 外宿、婚假、喪假共用三格：R13/S13、R15/S15、U16/W16（喪假不放第一格）
+      const slot = [null, null, null], who = [[], [], []];
+      [['外', '外宿', 0], ['婚', '婚假', 0], ['喪', '喪假', 1]].forEach(([code, name, from]) => {
+        const list = pick(c => c === code); if (!list.length) return;
+        let i = slot.indexOf(name);
+        if (i < 0) { i = slot.findIndex((s, k) => k >= from && !s); if (i < 0) i = 2; slot[i] = name; }
+        who[i] = who[i].concat(list);
+      });
+      V.R13 = slot[0] || '外宿'; V.S13 = who[0].join('.');
+      V.R15 = slot[1] || '喪假'; V.S15 = who[1].join('.');
+      V.U16 = slot[2] || ''; V.W16 = who[2].join('.');
+      if (!slot[2]) { V.U16 = '公假'; V.W16 = pub[1] || ''; }
+      const warn = [];
+      if (pub.length > 2) warn.push('公假超過 2 人，請手動修改');
+      if (slot[2] && pub[1]) warn.push('公假第二位因為格子已滿，請手動處理');
+
+      // 人員名冊（第 19–24 列，每列 8 格：編號＋姓名）
+      const everyone = D.people.concat(D.off, D.away || []).sort((a, b) => n(a) - n(b));
+      const SLOT = [[3, 4], [6, 7], [9, 10], [12, 13], [15, 16], [18, 19], [21, 22], [24, 25]];
+      [[19, p => n(p) < 10], [20, p => n(p) >= 10 && n(p) < 20], [21, p => n(p) >= 20 && n(p) < 30], [22, p => n(p) >= 30 && n(p) < 40],
+        [23, p => n(p) >= 40 && n(p) < 50], [24, p => n(p) >= 50]].forEach(([row, f]) =>
+        everyone.filter(f).slice(0, 8).forEach((p, i) => { set(SLOT[i][0], row, p.num); set(SLOT[i][1], row, p.name); }));
+
+      // 救災任務編組（照 VBA 目前的邏輯）
+      const w = today.map(p => String(p.num));
+      set(3, 27, w[0]); set(3, 28, w[1]);
+      let x = 2;
+      if (w[2] && Number(w[2]) < 10) { set(3, 29, w[2]); x = 3; }
+      let Y = w.length - 1 - x;
+      for (let i = x; i < w.length; i++) if (w[i] === '53') { w[i] = ''; Y--; }
+      const take = v => { for (let i = x; i < w.length; i++) if (w[i] && w[i] === v) { w[i] = ''; return v; } return ''; };
+      const next = () => { for (let i = x; i < w.length; i++) if (w[i]) { const v = w[i]; w[i] = ''; return v; } return ''; };
+      set(6, 27, take(at(firstOf('值班'), 0)));       // 11 車駕駛＝08 時值班
+      V.R31 = take(at(firstOf('值班'), 14));            // 火警值班＝22 時值班
+      set(21, 27, take(at(firstOf('一救'), 14)));      // 91 車司機
+      set(23, 27, take(at(second('一救'), 14)));       // 91 車救護員
+      set(6, 28, next()); set(6, 29, next());           // 61 駕駛、特種車司機
+      set(9, 27, next()); set(12, 27, next()); set(15, 27, next());   // 11 車後座
+      Y -= 9;
+      if (Y > 0) { V.U31 = next(); Y--; if (Y > 0) set(9, 28, next()); }
+
+      // 召回人員、備註
+      // 召回：補休、休假（補、超、◎、△）沒有連休 4 天以上的是第二梯次；輪休、連休 4 天以上的是第三梯次；
+      // 公假、婚假、喪假等其他假別都不召回，但算在連休天數裡（後端跨月份算好 run）
+      const RECALL = c => ['補', '超', '◎', '△'].includes(c);
+      const offs = D.off.slice().sort((a, b) => n(a) - n(b));
+      const tier2 = offs.filter(p => RECALL(p.code) && (p.run || 1) < 4).map(p => p.num);
+      const tier3 = offs.filter(p => String(p.code)[0] === '○' || (RECALL(p.code) && (p.run || 1) >= 4)).map(p => p.num);
+      V.P32 = `一、第一梯次(外勤、休息時間人員):${onDuty.map(p => p.num).join('.')}；第二梯次(補休、休假):${tier2.join('.')}；第三梯次(輪休及連4日不等):${tier3.join('.')}。\n二、備勤包括救災、救護、在隊車輛保養、試車、試水、試梯、在隊體技能訓練及資料處理等。\n三、搶救演練及訓練：包括常訓、組合訓練、體技能訓練、救災演練及其他應變演習訓練。\n四、分、小隊長帶班服勤應於勤務表載明，專案勤務、特定勤務於「其他臨時勤務」內依序註明。`;
+      V.Q37 = '1.在勤幹部:' + today.filter(p => n(p) >= 1 && n(p) <= 5).map(p => (n(p) === 1 ? '分隊長' : '小隊長') + p.name + ' ').join('') + '\n' + $('#memo').value;
+
+      // 畫出來
+      const S = window.SHEET42, W = S.cols.reduce((a, b) => a + b, 0), H = S.rows.reduce((a, b) => a + b, 0);
+      const z = Math.min(1510 / W, 1080 / H);          // 4.2 版是 A3 橫向、邊界 1cm／0.5cm
+      const COLN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const byRow = {};
+      S.cells.forEach(c => (byRow[c[0]] = byRow[c[0]] || []).push(c));
+      const AL = { l: 'left', c: 'center', r: 'right', '': 'left' }, VA = { t: 'top', c: 'middle', b: 'bottom', '': 'middle' };
+      const body = S.rows.map((ht, i) => `<tr style="height:${ht}px">` + (byRow[i + 1] || []).map(([r, c, rs, cs, v, fs, b, ha, va]) => {
+        const key = COLN[c - 1] + r, val = key in V ? V[key] : v;
+        const h = ha || (r === 13 || r === 15 || r === 32 ? 'l' : '');
+        return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
+      }).join('') + '</tr>').join('');
+      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel（同時存到資料庫）</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
+          <span class="muted">內容是畫面上現在的排班（含還沒存檔的修改）。Excel 用 4.2 版的勤務表範本填好，直接開來列印最準（A3 橫向）。</span>
+          <div id="smsg"></div>
+          ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
+        <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
       document.getElementById('sheet').scrollTop = 0;
+      document.getElementById('sxlsx').onclick = () => excelOut(V);
+    }).catch(e => alert(e.message));
+
+    // ---- 下載 Excel：資料庫的「勤務表範本.xlsx」填好內容，下載一份、雲端硬碟存一份 ----
+    const needExcel = () => (window.ExcelJS ? Promise.resolve() : new Promise((ok, bad) => {
+      const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+      s.onload = ok; s.onerror = () => bad(new Error('Excel 元件載入失敗，請檢查網路'));
+      document.head.appendChild(s);
+    }));
+    const b64ToBuf = b64 => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
+    const bufToB64 = buf => { const u = new Uint8Array(buf); let t = ''; for (let i = 0; i < u.length; i += 0x8000) t += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(t); };
+    const excelOut = V => {
+      const msg = t => { const el = document.getElementById('smsg'); if (el) el.innerHTML = t; };
+      const btn = document.getElementById('sxlsx'); if (btn) btn.disabled = true;
+      msg('<span class="muted">產生 Excel 中…</span>');
+      const name = D.date + ' 勤務表.xlsx';
+      Promise.all([needExcel(), call('getSheetTemplate')]).then(([, t]) => {
+        if (!t.data) throw new Error(`資料庫還沒有勤務表範本：請把「${t.name}」放到系統帳號雲端硬碟的「${t.folder}」資料夾`);
+        const wb = new ExcelJS.Workbook();
+        return wb.xlsx.load(b64ToBuf(t.data)).then(() => {
+          const ws = wb.worksheets[0];
+          Object.keys(V).forEach(k => { const v = V[k]; ws.getCell(k).value = v === '' ? null : /^\d+$/.test(v) ? Number(v) : v; });
+          return wb.xlsx.writeBuffer();
+        });
+      }).then(buf => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        msg('<span class="muted">已下載，存到資料庫中…</span>');
+        return call('saveSheetFile', D.date, bufToB64(buf));
+      }).then(r => msg(`<span class="ok">已下載，也存到資料庫：${esc(r.path)}</span>`))
+        .catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
+        .then(() => { if (btn) btn.disabled = false; });
     };
     load();
   }
