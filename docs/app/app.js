@@ -119,7 +119,10 @@
    * opts.today：粗體的日；opts.mark(d, i) 回傳格子額外的 class；opts.title
    */
   // 固定欄寬，讓月班表和已排次數上下對齊：前兩欄（日、星期／標題）＋每人一欄
-  const cols = n => `<colgroup><col style="width:24px"><col style="width:26px">${'<col style="width:24px">'.repeat(n)}</colgroup>`;
+  const cols = (n, extra = 0) => `<colgroup><col style="width:24px"><col style="width:26px">${'<col style="width:24px">'.repeat(n)}${'<col style="width:28px">'.repeat(extra)}</colgroup>`;
+  // 月班表右邊「每天 A／B／宿 排了沒」的欄：固定在畫面右側
+  const rsPos = (k, n) => `right:${(n - 1 - k) * 28}px`;
+  const shiftStyle = (opts, c) => { const col = opts.color && opts.color(c); return col ? ` style="color:${esc(col)}"` : ''; };
 
   function rosterTable(y, m, people, days, opts = {}) {
     const nums = people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('');
@@ -129,10 +132,12 @@
       return `<tr class="${day.d === opts.today ? 'today' : ''}"><td>${day.d}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` +
         day.codes.map((c, i) => (day.away[i]
           ? `<td class="off" data-d="${day.d}" data-i="${i}">—</td>`
-          : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''} ${opts.shift && opts.shift(c) ? 'shift' : ''}" data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') + '</tr>';
+          : `<td class="${grp(people[i])} ${opts.mark ? opts.mark(day.d, i) : ''} ${opts.shift && opts.shift(c) ? 'shift' : ''}"${shiftStyle(opts, c)} data-d="${day.d}" data-i="${i}">${esc(c)}</td>`)).join('') +
+        (opts.right ? opts.right.heads.map((h, k) => opts.right.cell(day.d, k)).join('') : '') + '</tr>';
     }).join('');
-    return `<h2>${opts.title || `${y}年${m}月班表`}</h2><div class="scroll${opts.grid ? ' gridwrap' : ''}"><table class="roster${opts.grid ? ' grid' : ''}">${opts.grid ? cols(people.length) : ''}
-      <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}</tr><tr>${names}</tr>${body}</table></div>`;
+    const R = opts.right ? opts.right.heads : [];
+    return `<h2>${opts.title || `${y}年${m}月班表`}</h2><div class="scroll${opts.grid ? ' gridwrap' : ''}"><table class="roster${opts.grid ? ' grid' : ''}">${opts.grid ? cols(people.length, R.length) : ''}
+      <tr><th rowspan="2">日</th><th rowspan="2">星期</th>${nums}${R.map((h, k) => `<th rowspan="2" class="rs" style="${rsPos(k, R.length)}">${esc(h)}</th>`).join('')}</tr><tr>${names}</tr>${body}</table></div>`;
   }
 
   // ---------- 月班表（檢視、填固定排班） ----------
@@ -149,9 +154,8 @@
         : '只能檢視；可以選取後 Ctrl+C 複製。'}</div>
       <div class="card bar"><input type="month" id="mon"> <button class="plain" id="go">重新整理</button>
         ${edit ? '<button id="save" disabled>儲存</button> <button class="plain" id="undo" disabled>放棄修改</button>' : ''}
-        <button class="plain" id="cnt">已排次數</button>
         <span id="msg" class="muted"></span></div>
-      <div class="card" id="out" hidden></div><div class="card" id="stats" hidden></div><div id="pick" class="picker" hidden></div>`;
+      <div class="card" id="out" hidden></div><div class="card statsbar" id="stats" hidden></div><div id="pick" class="picker" hidden></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
     let data = null, defs = [], before = {}, baseMonth = 0, pending = {};   // pending['d|姓名'] = code
@@ -161,6 +165,18 @@
     const codeAt = (d, i) => (key(d, i) in pending ? pending[key(d, i)] : orig(d, i));
     const isAway = (d, i) => data.days[d - 1].away[i];
     const names = () => defs.map(x => x.name);
+    const colorOf = c => { const df = defs.find(x => x.name === c); return (df && df.color) || ''; };
+    // 右邊每天的固定班（休息類不列）：排了顯示番號、沒排標紅底、排到兩個人以上標橘底
+    const rightDefs = () => defs.filter(x => x.kind !== '休息').map(x => x.name);
+    const rightCell = (d, k) => {
+      const nm = rightDefs()[k], who = data.people.filter((p, i) => !isAway(d, i) && codeAt(d, i) === nm).map(p => p.num);
+      return `<td class="rs ${who.length ? (who.length > 1 ? 'dup' : 'ok') : 'miss'}" style="${rsPos(k, rightDefs().length)}" data-rs="${d}" title="${esc(nm)}">${esc(who.join('.'))}</td>`;
+    };
+    const drawRight = d => {
+      const tr = $(`#out td[data-d="${d}"]`).parentNode;
+      tr.querySelectorAll('td.rs').forEach(x => x.remove());
+      tr.insertAdjacentHTML('beforeend', rightDefs().map((h, k) => rightCell(d, k)).join(''));
+    };
     const td = (d, i) => $(`#out td[data-d="${d}"][data-i="${i}"]`);
     const nDays = () => data.days.length, nPeople = () => data.people.length;
 
@@ -178,6 +194,8 @@
       c.textContent = code;
       c.classList.toggle('changed', key(d, i) in pending);
       c.classList.toggle('shift', names().includes(code));
+      c.style.color = colorOf(code);
+      drawRight(d);
       return true;
     };
     const draw = () => {
@@ -185,9 +203,12 @@
       const wrap = $('#out .scroll'), left = wrap ? wrap.scrollLeft : 0, top = wrap ? wrap.scrollTop : 0;
       const days = data.days.map(day => Object.assign({}, day, { codes: day.codes.map((c, i) => codeAt(day.d, i)) }));
       $('#out').innerHTML = rosterTable(y, m, data.people, days, {
-        grid: true, mark: (d, i) => (key(d, i) in pending ? 'changed' : ''), shift: c => names().includes(c) });
+        grid: true, mark: (d, i) => (key(d, i) in pending ? 'changed' : ''), shift: c => names().includes(c), color: colorOf,
+        right: { heads: rightDefs(), cell: rightCell } });
       const w = $('#out .scroll');
       w.tabIndex = 0; w.scrollLeft = left; w.scrollTop = top;
+      // 月班表左右捲動時，下面的已排次數跟著捲，欄位才會對齊
+      w.onscroll = () => { const s2 = $('#stats .scroll'); if (s2) s2.scrollLeft = w.scrollLeft; };
       paintSel(); refreshButtons();
     };
 
@@ -339,28 +360,11 @@
       });
       const rows = (label, arr, cls) => groups.map((g, k) => `<tr class="${k ? '' : cls}">${k ? '' : `<th rowspan="${groups.length}" class="lbl">${label}</th>`}<th>${esc(g)}</th>` +
         data.people.map((p, i) => `<td class="${grp(p)}">${arr[i][g] || ''}</td>`).join('') + '</tr>').join('');
-      const [y] = ym($('#mon').value);
-      const wrap = $('#stats .scroll'), left = wrap ? wrap.scrollLeft : 0;
-      $('#stats').innerHTML = `<h2>已排次數</h2>
-        <div class="muted">全年累計${baseMonth ? `：以累計基準（${y}年1～${baseMonth}月，4.2 版匯入）為準，加減之後或之前各月` : `：${y}年1月起（還沒匯入累計基準）`}，含這個月還沒儲存的修改。</div>
-        <div class="scroll"><table class="roster grid stats">${cols(data.people.length)}
-        <tr><th colspan="2" class="lbl"></th>${data.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('')}</tr>
-        ${rows('當月', now, 'top')}${rows('全年<br>累計', total, 'top')}</table></div>` +
-        (edit ? `<p class="muted">匯入累計基準：上傳 4.2 版的月班表檔（例如 10 月），讀它的「累計」宿／A／B 列。
-          <label>截至 <input type="number" id="bm" min="1" max="12" value="10" style="width:60px"> 月</label>
-          <input type="file" id="bf" accept=".xlsm,.xlsx"></p>` : '');
-      $('#stats .scroll').scrollLeft = left;
-      if (edit) $('#bf').onchange = () => importBase($('#bf').files[0], Number($('#bm').value));
-    };
-    const importBase = (file, bm) => {
-      if (!file) return;
-      const [y, m] = ym($('#mon').value);
-      $('#msg').textContent = '讀取中…';
-      readBook(file).then(wb => {
-        const rows = parseBase(wb);
-        if (!confirm(`讀到 ${rows.length} 人的累計（宿／A／B），存成 ${y} 年 1～${bm} 月的累計基準？`)) { $('#msg').textContent = ''; return; }
-        return call('saveBase', y, bm, rows).then(r => load(`已存累計基準 ${r.count} 人。`));
-      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+      const extra = rightDefs().length, pad = extra ? `<td colspan="${extra}"></td>` : '';
+      $('#stats').innerHTML = `<div class="scroll"><table class="roster grid stats">${cols(data.people.length, extra)}
+        <tr><th colspan="2" class="lbl">已排次數</th>${data.people.map(p => `<th class="${grp(p)}">${esc(p.num)}</th>`).join('')}${pad}</tr>
+        ${rows('當月', now, 'top').replace(/<\/tr>/g, pad + '</tr>')}${rows('全年<br>累計', total, 'top').replace(/<\/tr>/g, pad + '</tr>')}</table></div>`;
+      const w = $('#out .scroll'); if (w) $('#stats .scroll').scrollLeft = w.scrollLeft;
     };
 
     const load = (done = '') => {
@@ -369,7 +373,7 @@
       Promise.all([call('getMonth', y, m), call('getShiftDefs'), call('getShiftCounts', y, m)]).then(([d, sd, sc]) => {
         data = d; defs = sd.defs; before = sc.before; baseMonth = sc.baseMonth || 0;
         if (!d.exists) { $('#out').hidden = $('#stats').hidden = true; $('#msg').textContent = `${y} 年 ${m} 月還沒有月班表，請先匯入假表。`; return; }
-        $('#msg').textContent = done; $('#out').hidden = false; draw();
+        $('#msg').textContent = done; $('#out').hidden = $('#stats').hidden = false; draw();
       }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
     };
     $('#go').onclick = () => {
@@ -377,11 +381,6 @@
       load();
     };
     $('#mon').onchange = () => load();
-    $('#cnt').onclick = () => {
-      if (!data || !data.exists) return;
-      $('#stats').hidden = !$('#stats').hidden;
-      if (!$('#stats').hidden) { drawStats(); $('#stats').scrollIntoView({ behavior: 'smooth' }); }
-    };
     if (edit) {
       $('#undo').onclick = () => { pending = {}; draw(); };
       $('#save').onclick = () => {
@@ -394,26 +393,6 @@
       };
     }
     load();
-  }
-
-  /** 從 4.2 版月班表讀「累計」區的宿／A／B 列：A 欄「累計」那列是宿，往下 B 欄是 A、B 的列。 */
-  function parseBase(wb) {
-    const name = wb.SheetNames.find(n => /月班表/.test(n)) || wb.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
-    const head = rows.findIndex(r => r.slice(2).filter(v => Number(v) > 0).length >= 5);
-    if (head < 0) throw new Error('找不到番號列');
-    const start = rows.findIndex(r => String(r[0]).trim() === '累計');
-    if (start < 0) throw new Error('找不到 A 欄是「累計」的列');
-    const find = label => { for (let r = start; r < Math.min(rows.length, start + 10); r++) if (String(rows[r][1]).trim() === label) return rows[r]; return null; };
-    const lines = { '宿': find('宿'), A: find('A'), B: find('B') };
-    if (!lines['宿'] || !lines.A || !lines.B) throw new Error('「累計」區找不到宿、A、B 三列');
-    const out = [];
-    for (let c = 2; c < rows[head].length; c++) {
-      const nm = String(rows[head + 1][c] || '').replace(/\s+/g, '');
-      if (!(Number(rows[head][c]) > 0) || !nm) continue;
-      out.push({ name: nm, '宿': Number(lines['宿'][c]) || 0, A: Number(lines.A[c]) || 0, B: Number(lines.B[c]) || 0 });
-    }
-    return out;
   }
 
   // ---------- 編制人員 ----------
@@ -491,18 +470,19 @@
   function pageShiftDefs(main) {
     const edit = has('排班');
     main.innerHTML = `<h1>固定排班設定</h1>
-      <div class="muted">月班表點格子時，只會出現這裡設定的名稱。時間從早上 08 到隔天 07，勾選這個班要上的小時。<br>排班區讀取當天時，會照「勤務別」和「第幾位」把人放進值班、一救、二救或休息列（例如 A1 放一救第 1 位、A2 放一救第 2 位）。勤務別選「休息」的（例如「長」）同一天可以好幾個人，也不算在已排次數。</div>
+      <div class="muted">月班表點格子時，只會出現這裡設定的名稱；「月班表字色」是這個班在月班表上的字的顏色（預設紅色）。時間從早上 08 到隔天 07，勾選這個班要上的小時。<br>排班區讀取當天時，會照「勤務別」和「第幾位」把人放進值班、一救、二救或休息列（例如 A1 放一救第 1 位、A2 放一救第 2 位）。勤務別選「休息」的（例如「長」）同一天可以好幾個人，也不算在已排次數。</div>
       <div class="card"><div class="scroll" id="list"></div>
         ${edit ? '<p><button class="plain" id="add">＋ 新增</button> <button id="save">儲存</button> <span id="msg" class="muted"></span></p>' : ''}</div>`;
     const $ = s => main.querySelector(s);
     let defs = [], version = 0;
     const draw = () => {
-      $('#list').innerHTML = `<table class="defs"><tr><th>名稱</th>${HOURS.map(h => `<th>${h}</th>`).join('')}<th>勤務別</th><th>第幾位</th>${edit ? '<th></th>' : ''}</tr>` +
+      $('#list').innerHTML = `<table class="defs"><tr><th>名稱</th>${HOURS.map(h => `<th>${h}</th>`).join('')}<th>勤務別</th><th>第幾位</th><th>月班表字色</th>${edit ? '<th></th>' : ''}</tr>` +
         defs.map((d, k) => `<tr data-k="${k}">
           <td><input class="nm" value="${esc(d.name)}" size="5" ${edit ? '' : 'disabled'}></td>
           ${HOURS.map(h => `<td><input type="checkbox" data-h="${h}" ${d.hours.includes(h) ? 'checked' : ''} ${edit ? '' : 'disabled'}></td>`).join('')}
           <td><select class="kd" ${edit ? '' : 'disabled'}>${SHIFT_KINDS.map(x => `<option ${x === d.kind ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
           <td><select class="ps" ${edit ? '' : 'disabled'}>${[1, 2, 3, 4].map(x => `<option ${x === d.pos ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
+          <td><input type="color" class="cl" value="${esc(d.color || '#d0021b')}" ${edit ? '' : 'disabled'}></td>
           ${edit ? '<td><button class="plain del">刪除</button></td>' : ''}</tr>`).join('') + '</table>' +
         (defs.length ? '' : '<div class="muted">還沒有設定。</div>');
     };
@@ -512,6 +492,7 @@
         d.name = tr.querySelector('.nm').value.trim();
         d.kind = tr.querySelector('.kd').value;
         d.pos = Number(tr.querySelector('.ps').value);
+        d.color = tr.querySelector('.cl').value === '#d0021b' ? '' : tr.querySelector('.cl').value;
         d.hours = [...tr.querySelectorAll('input[data-h]:checked')].map(x => x.dataset.h);
       });
     };

@@ -122,3 +122,12 @@ table.s42 td.diag { background:url("data:image/svg+xml,%3Csvg xmlns='http://www.
 .hbar { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .hbar h2 { margin:0; }
 #teach { color:#b3261e; }
+
+/* 月班表右邊每天固定班：固定在右側；排了＝綠、沒排＝紅、兩人以上＝橘 */
+table.grid .rs { position:sticky; z-index:2; background:var(--card); font-size:11px; border-left-width:2px; }
+table.grid td.rs.ok { background:#d8f5d0; color:#1f2328; }
+table.grid td.rs.miss { background:#ffd6d6; }
+table.grid td.rs.dup { background:#ffd8a8; color:#1f2328; }
+/* 已排次數固定在畫面最下面，高度剛好放得下表格 */
+.card.statsbar { position:sticky; bottom:0; z-index:4; padding:4px 8px; margin-bottom:0; box-shadow:0 -2px 6px rgba(0,0,0,.12); }
+.card.statsbar .scroll { overflow-x:hidden; }
