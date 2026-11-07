@@ -51,6 +51,7 @@ function shiftDefs_() {
       name, kind,
       pos: Number(r['第幾位']) || (/2$/.test(name) ? 2 : 1),
       hours: str_(r['時間']).split(/[,，、\s]+/).filter(h => h).map(h => pad_(Number(h))),
+      color: /^#[0-9a-f]{6}$/i.test(str_(r['月班表字色'])) ? str_(r['月班表字色']) : '',
     };
   }).filter(d => d.name);
 }
@@ -83,15 +84,16 @@ function saveShiftDefs(token, defs, version) {
     if (SHIFT_KINDS.indexOf(d.kind) < 0) throw new Error(d.name + '：勤務別要選' + SHIFT_KINDS.join('、'));
     d.pos = Number(d.pos) || 1;
     if (!d.hours.length || d.hours.some(h => HOURS.indexOf(h) < 0)) throw new Error(d.name + '：請勾選時間');
+    d.color = /^#[0-9a-f]{6}$/i.test(str_(d.color)) ? str_(d.color) : '';
   });
   return guarded_('固定排班', version, () => {
     const ss = SpreadsheetApp.getActive();
     const sh = ss.getSheetByName('固定排班') || ss.insertSheet('固定排班');
-    const values = [['名稱', '時間', '勤務別', '第幾位']].concat(defs.map(d =>
-      [d.name, HOURS.filter(h => d.hours.indexOf(h) >= 0).join(','), d.kind, String(d.pos)]));
+    const values = [['名稱', '時間', '勤務別', '第幾位', '月班表字色']].concat(defs.map(d =>
+      [d.name, HOURS.filter(h => d.hours.indexOf(h) >= 0).join(','), d.kind, String(d.pos), d.color]));
     sh.clear();
-    sh.getRange(1, 1, values.length, 4).setNumberFormat('@').setValues(values);
-    sh.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#ddebf7');
+    sh.getRange(1, 1, values.length, 5).setNumberFormat('@').setValues(values);
+    sh.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#ddebf7');
     sh.setFrozenRows(1);
     delete cache_['固定排班'];
     log_(s.user, '固定排班設定', defs.map(d => d.name).join('、'));
