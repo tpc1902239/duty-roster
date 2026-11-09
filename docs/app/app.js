@@ -51,6 +51,7 @@
     { id: 'items', name: '外勤項目設定', show: () => true },
     { id: 'colors', name: '排班區顏色', show: () => true },
     { id: 'staff', name: '編制人員', show: () => true },
+    { id: 'drill', name: '駕訓登記', show: () => true },
     { id: 'leave', name: '匯入假表', show: () => has('假表承辦') },
     { id: 'tables', name: '車輛／救護訓練', show: () => has('車輛承辦') || has('救護訓練承辦') },
     { id: 'read', name: '讀取測試', show: () => true },
@@ -65,7 +66,7 @@
       PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ day: pageDay, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 讀取測試 ----------
@@ -391,6 +392,62 @@
           .then(r => load(`已儲存 ${r.saved} 格。`))
           .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
       };
+    }
+    load();
+  }
+
+  // ---------- 駕訓登記 ----------
+
+  const DRILL_MAX = 4;
+  const drillDone = r => r.dates.slice(0, r.need).filter(Boolean).length >= r.need;
+
+  function pageDrill(main) {
+    const edit = has('排班');
+    main.innerHTML = `<h1>駕訓登記</h1>
+      <div class="muted">名單是編制人員（幹部不用駕訓，不列）。應訓幾小時就有幾格，每格打一個日期；排班區存檔時，駕訓的學員（同一時段第二人）會自動填進下一個空格，手動打的不會被蓋掉。應訓時數下個月會沿用。</div>
+      <div class="card bar"><input type="month" id="mon"> ${edit ? '<button id="save" disabled>儲存</button>' : ''} <span id="msg" class="muted"></span></div>
+      <div class="card"><div class="scroll" id="list"></div></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    let rows = [], version = 0, dirty = false;
+    const setDirty = v => { dirty = v; if (edit) { $('#save').disabled = !v; $('#save').textContent = v ? '儲存 *' : '儲存'; } };
+    const draw = () => {
+      let html = `<table class="defs drill"><colgroup><col style="width:44px"><col style="width:76px"><col style="width:70px">${'<col style="width:104px">'.repeat(DRILL_MAX)}</colgroup><tr><th>番號</th><th>姓名</th><th>應訓時數</th><th colspan="${DRILL_MAX}">駕訓日期</th></tr>`, tens = null;
+      rows.forEach((r, k) => {
+        const t = Math.floor(Number(r.num) / 10);
+        if (tens !== null && t !== tens) html += `<tr class="gap"><td colspan="${3 + DRILL_MAX}"></td></tr>`;
+        tens = t;
+        html += `<tr data-k="${k}" class="${drillDone(r) ? 'done' : ''}"><td>${esc(r.num)}</td><td class="nm">${esc(r.name)}</td>
+          <td><select class="need" ${edit ? '' : 'disabled'}>${[1, 2, 3, 4].map(n => `<option ${n === r.need ? 'selected' : ''}>${n}</option>`).join('')}</select></td>` +
+          Array.from({ length: DRILL_MAX }, (_, i) => (i < r.need
+            ? `<td><input class="dt" data-i="${i}" value="${esc(r.dates[i] || '')}" size="7" ${edit ? '' : 'disabled'}></td>`
+            : '<td class="none"></td>')).join('') + '</tr>';
+      });
+      $('#list').innerHTML = html + '</table>' + (rows.length ? '' : '<div class="muted">編制人員還沒有隊員。</div>');
+    };
+    const load = (done = '') => {
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '讀取中…';
+      return call('getDrill', y, m).then(r => {
+        rows = r.rows.map(x => Object.assign(x, { dates: x.dates.concat(Array(DRILL_MAX).fill('')).slice(0, DRILL_MAX) }));
+        version = r.version; setDirty(false); draw(); $('#msg').textContent = done;
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    $('#mon').onchange = () => { if (!dirty || confirm('還有沒儲存的修改，換月份會放棄，確定嗎？')) load(); };
+    if (edit) {
+      $('#list').onchange = e => {
+        const tr = e.target.closest('tr[data-k]'); if (!tr) return;
+        const r = rows[Number(tr.dataset.k)];
+        if (e.target.classList.contains('need')) { r.need = Number(e.target.value); setDirty(true); draw(); return; }
+        if (e.target.classList.contains('dt')) { r.dates[Number(e.target.dataset.i)] = e.target.value.trim(); setDirty(true); tr.classList.toggle('done', drillDone(r)); }
+      };
+      $('#save').onclick = () => {
+        const [y, m] = ym($('#mon').value);
+        $('#msg').textContent = '儲存中…';
+        call('saveDrill', y, m, rows, version).then(r => load(`已儲存 ${r.count} 人。`))
+          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+      };
+      window.onbeforeunload = e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
     }
     load();
   }
@@ -787,15 +844,19 @@
           <input id="itx" placeholder="內容" size="10" hidden>
           <select id="st">${HOURS.map((h, i) => `<option value="${i}">${h}</option>`).join('')}</select> 到
           <select id="en"></select></div>
-        <div class="muted">勾要出勤的人（<span class="busytag">橘色</span>＝那段時間已經有排）：</div><div class="chips" id="who"></div>
+        <div class="muted">勾要出勤的人（<span class="busytag">橘色</span>＝那段時間已經有排${'<span id="drtag" hidden>；<span class="drilltag">綠色</span>＝這個月駕訓已滿</span>'}）：</div><div class="chips" id="who"></div>
         <div class="muted">沒勾人就加一列空的，之後再填。</div>`;
       const it = () => D.items[Number($('#it').value)];
       const refresh = () => {
         $('#itx').hidden = !it().label.includes('{}');
+        $('#drtag').hidden = it().name !== '駕訓';
         const a = Number($('#st').value), b = Number($('#en').value);
         const busy = new Set(); for (let h = a; h < b; h++) busyAt(h).forEach(v => busy.add(v));
         const checked = new Set([...main.querySelectorAll('#who input:checked')].map(x => x.value));
-        const box = p => `<label class="${busy.has(String(p.num)) ? 'busy' : ''}" title="${busy.has(String(p.num)) ? '這段時間已經有排' : ''}"><input type="checkbox" value="${p.num}" ${checked.has(String(p.num)) ? 'checked' : ''}>${esc(p.num)} ${esc(p.name)}${p.code && p.off ? `<small>${esc(p.code)}</small>` : ''}</label>`;
+        // 選「駕訓」時，這個月駕訓已滿的人換顏色（那段時間已經有排的橘色優先）
+        const full = new Set(it().name === '駕訓' ? (D.drill || []).filter(drillDone).map(r => r.name) : []);
+        const tag = p => (busy.has(String(p.num)) ? ['busy', '這段時間已經有排'] : full.has(p.name) ? ['drilled', '這個月駕訓已滿'] : ['', '']);
+        const box = p => `<label class="${tag(p)[0]}" title="${tag(p)[1]}"><input type="checkbox" value="${p.num}" ${checked.has(String(p.num)) ? 'checked' : ''}>${esc(p.num)} ${esc(p.name)}${p.code && p.off ? `<small>${esc(p.code)}</small>` : ''}</label>`;
         $('#who').innerHTML = D.people.map(box).join('') +
           (D.off.length ? `<div class="sep">休假中（外勤可以排）</div>` + D.off.map(p => box(Object.assign({ off: true }, p))).join('') : '');
       };
@@ -1108,8 +1169,9 @@
       $('#msg').textContent = '讀取中…';
       const [y, m] = ym($('#date').value);
       const table = kind => call('getTable', y, m, kind).then(t => t.rows).catch(() => []);
-      return Promise.all([call('getDay', $('#date').value), table('車輛'), table('救護訓練')])
-        .then(([d, car, train]) => Object.assign(d, { cars: car, trains: train }))
+      const drill = call('getDrill', y, m).then(r => r.rows).catch(() => []);
+      return Promise.all([call('getDay', $('#date').value), table('車輛'), table('救護訓練'), drill])
+        .then(([d, car, train, dr]) => Object.assign(d, { cars: car, trains: train, drill: dr }))
         .then(d => start(d, dayDrafts()[d.date] ? 'draft' : d.saved ? 'saved' : 'fresh', done))
         .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
     };

@@ -131,3 +131,13 @@ table.grid td.rs.dup { background:#ffd8a8; color:#1f2328; }
 /* 已排次數固定在畫面最下面，高度剛好放得下表格 */
 .card.statsbar { position:sticky; bottom:0; z-index:4; padding:4px 8px; margin-bottom:0; box-shadow:0 -2px 6px rgba(0,0,0,.12); }
 .card.statsbar .scroll { overflow-x:hidden; }
+
+/* 駕訓登記 */
+table.drill tr.gap td { height:10px; border-left:0; border-right:0; background:transparent; }
+table.drill td.nm { text-align:left; padding:2px 8px; }
+table.drill td.none { background:#f0f1f3; }
+table.drill tr.done td:not(.none) { background:#e3f6dc; }
+table.drill { table-layout:fixed; width:max-content; }
+table.drill input.dt { text-align:center; width:96px; box-sizing:border-box; }
+#who label.drilled { background:#a5d6a7; color:#1f2328; border-radius:4px; padding:0 3px; }
+.drilltag { background:#a5d6a7; color:#1f2328; border-radius:4px; padding:0 3px; }

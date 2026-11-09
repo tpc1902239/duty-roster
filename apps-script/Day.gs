@@ -217,7 +217,7 @@ function saveDay(token, date, day, version) {
   const [y, m, d] = date.split('-').map(Number);
   const name = sheetName_(y, m, '存檔');
   if (!day.rows || !day.rows.length) throw new Error('沒有資料可以存');
-  return guarded_(name, version, () => {
+  const out = guarded_(name, version, () => {
     const blocks = saveBlocks_(y, m);
     const existed = !!blocks[d];
     const pad = r => r.concat(Array(SAVE_W - r.length).fill('')).slice(0, SAVE_W);
@@ -241,6 +241,9 @@ function saveDay(token, date, day, version) {
     log_(s.user, existed ? '異動勤務表' : '存檔勤務表', date + '：' + day.rows.length + ' 列');
     return { existed };
   });
+  // 駕訓學員的日期自動登記（失敗不影響存檔）
+  try { drillAuto_(date, day); } catch (e) { out.drillError = e.message; }
+  return out;
 }
 
 // ---------- 排班區顏色 ----------
