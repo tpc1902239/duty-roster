@@ -444,13 +444,28 @@
   function pageDrill(main) {
     const edit = has('排班');
     main.innerHTML = `<h1>駕訓登記</h1>
-      <div class="muted">名單是編制人員（幹部不用駕訓，不列）。應訓幾小時就有幾格，每格打一個日期；排班區存檔時，駕訓的學員（同一時段第二人）會自動填進下一個空格，手動打的不會被蓋掉。應訓時數下個月會沿用。</div>
-      <div class="card bar"><input type="month" id="mon"> ${edit ? '<button id="save" disabled>儲存</button>' : ''} <span id="msg" class="muted"></span></div>
+      <div class="muted">名單是編制人員（幹部不用駕訓，不列）。應訓幾小時就有幾格，每格打一個日期；排班區存檔時，駕訓的學員（同一時段第二人）會自動填進下一個空格，手動打的不會被蓋掉。應訓時數下個月會沿用。修改後會自動存檔。</div>
+      <div class="card bar"><input type="month" id="mon"> <span id="msg" class="muted"></span></div>
       <div class="card"><div class="scroll" id="list"></div></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
-    let rows = [], version = 0, dirty = false;
-    const setDirty = v => { dirty = v; if (edit) { $('#save').disabled = !v; $('#save').textContent = v ? '儲存 *' : '儲存'; } };
+    let rows = [], version = 0, dirty = false, saving = null, again = false;
+    const setDirty = v => { dirty = v; };
+    // 修改即存檔：存檔中又改了，等這次存完再存一次；別人先存過（版本不同）就重新讀取
+    const save = () => {
+      if (saving) { again = true; return; }
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '存檔中…';
+      saving = call('saveDrill', y, m, rows, version).then(r => {
+        version = r.version; saving = null;
+        if (again) { again = false; return save(); }
+        setDirty(false); $('#msg').textContent = '已自動存檔 ' + new Date().toTimeString().slice(0, 5);
+      }).catch(e => {
+        saving = null; again = false;
+        alert('存檔失敗：' + e.message + '\n會重新讀取最新的資料，請再改一次。');
+        load();
+      });
+    };
     const draw = () => {
       let html = `<table class="defs drill"><colgroup><col style="width:44px"><col style="width:76px"><col style="width:70px">${'<col style="width:104px">'.repeat(DRILL_MAX)}</colgroup><tr><th>番號</th><th>姓名</th><th>應訓時數</th><th colspan="${DRILL_MAX}">駕訓日期</th></tr>`, tens = null;
       rows.forEach((r, k) => {
@@ -478,14 +493,8 @@
       $('#list').onchange = e => {
         const tr = e.target.closest('tr[data-k]'); if (!tr) return;
         const r = rows[Number(tr.dataset.k)];
-        if (e.target.classList.contains('need')) { r.need = Number(e.target.value); setDirty(true); draw(); return; }
-        if (e.target.classList.contains('dt')) { r.dates[Number(e.target.dataset.i)] = e.target.value.trim(); setDirty(true); tr.classList.toggle('done', drillDone(r)); }
-      };
-      $('#save').onclick = () => {
-        const [y, m] = ym($('#mon').value);
-        $('#msg').textContent = '儲存中…';
-        call('saveDrill', y, m, rows, version).then(r => load(`已儲存 ${r.count} 人。`))
-          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+        if (e.target.classList.contains('need')) { r.need = Number(e.target.value); setDirty(true); draw(); save(); return; }
+        if (e.target.classList.contains('dt')) { r.dates[Number(e.target.dataset.i)] = e.target.value.trim(); setDirty(true); tr.classList.toggle('done', drillDone(r)); save(); }
       };
       window.onbeforeunload = e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
     }
@@ -1039,6 +1048,12 @@
         const late = restH.filter(h => h >= 14 && h < 22);
         if (late.length && Number(n) >= 10 && !restDef.has(p.code)) add('提醒', `${n} ${p.name} 休息排在 ${hoursText(late)}（22–06 原則上只有幹部）`);
         const extra = range(0, 24).filter(h => rows.some(r => duty(r) && r.cells[h] === n && !own.has(r.type + h)));
+        // 前一天上 B 班的人，隔天 12 點前不排值班
+        const yb = (D.yesterday || {})[p.name];
+        if (yb && /^B/i.test(yb)) {
+          const early = range(0, 4).filter(h => rows.some(r => groupOf(r) === '值班' && r.cells[h] === n));
+          if (early.length) add('提醒', `${n} ${p.name} 昨天 ${yb} 班，12 點前排了值班：${hoursText(early)}`, early.map(h => [rows.findIndex(r => groupOf(r) === '值班' && r.cells[h] === n), h]));
+        }
         if (Number(n) === 1 && extra.length) add('提醒', `分隊長有排班：${hoursText(extra)}`);
       });
       const low = range(0, 24).filter(h => standby(h).length < minAt(h));
@@ -1187,11 +1202,11 @@
       }
       // 還沒存檔的日子（新的一天、或草稿裡備註是空的）帶入最近一天存檔的備註
       $('#memo').value = mode === 'saved' ? d.saved.memo : (mode === 'draft' && draft.memo) || (d.saved ? '' : d.prevMemo || '');
-      // 車輛保養＝值宿的人、二替＝A 班（4.3 版起直接帶入）；存過的照存檔
+      // 車輛保養＝值宿的人（直接帶入）；二替不預填（2026-11-11 瑋哥）；存過的照存檔
       const byKind = test => d.people.filter(p => { const df = defOf(p.code); return df && test(df); }).sort((a, b) => a.code.localeCompare(b.code)).map(p => String(p.num));
       const pick = (k, dflt) => (mode === 'draft' && draft[k] ? draft[k] : mode === 'saved' && d.saved[k] ? d.saved[k] : dflt);
       $('#car').value = pick('car', byKind(df => df.kind === '值班')).join('.');
-      const sb = pick('sub', byKind(df => /^A/i.test(df.name)));
+      const sb = pick('sub', []);
       $('#sub1').value = sb[0] || ''; $('#sub2').value = sb.slice(1).join('.');
       const tr = (d.trains || []).slice(1).find(r => Number(r[0]) === Number(d.date.slice(8)));
       $('#teach').innerHTML = tr && String(tr[4]).trim() ? `今日救護教官：<b>${esc(tr[4])}</b>` : '';
@@ -1434,12 +1449,13 @@
         const h = ha || (r === 13 || r === 15 || r === 32 ? 'l' : '');
         return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
       }).join('') + '</tr>').join('');
-      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
+      sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel</button> <button id="snfa">下載消防署格式</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
           <div id="smsg"></div>
           ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
         <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
       document.getElementById('sheet').scrollTop = 0;
       document.getElementById('sxlsx').onclick = () => excelOut(V);
+      document.getElementById('snfa').onclick = () => nfaOut(V);
     }).catch(e => alert(e.message));
 
     // ---- 下載 Excel：資料庫的「勤務表範本.xlsx」（4.2 版原檔清空每天會變的格子）直接改 XML 填值 ----
@@ -1478,7 +1494,7 @@
       const msg = t => { const e = document.getElementById('smsg'); if (e) e.innerHTML = t; };
       const btn = document.getElementById('sxlsx'); if (btn) btn.disabled = true;
       msg('<span class="muted">產生 Excel 中…</span>');
-      const name = D.date + ' 勤務表.xlsx', SHEET = 'xl/worksheets/sheet1.xml';
+      const name = '霧峰分隊' + D.date.slice(5, 7) + D.date.slice(8) + '.xlsx', SHEET = 'xl/worksheets/sheet1.xml';
       Promise.all([needZip(), call('getSheetTemplate')]).then(([, t]) => {
         if (!t.data) throw new Error(`資料庫還沒有勤務表範本：請把「${t.name}」放到系統帳號雲端硬碟的「${t.folder}」資料夾`);
         return JSZip.loadAsync(b64ToBuf(t.data), { createFolders: false });
@@ -1488,6 +1504,78 @@
       })).then(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        msg('');
+      }).catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
+        .then(() => { if (btn) btn.disabled = false; });
+    };
+
+    // ---- 消防署格式（勤務分配表上傳用）：版面在 nfa.js，照消防署系統匯出的檔案重建 ----
+    const needNFA = () => (window.NFA ? Promise.resolve() : new Promise((ok, bad) => {
+      const s = document.createElement('script'); s.src = 'nfa.js?v=' + Date.now();
+      s.onload = ok; s.onerror = () => bad(new Error('消防署格式載入失敗，請檢查網路'));
+      document.head.appendChild(s);
+    }));
+    // 外勤列放到消防署表的哪一列（第 8–14 列）
+    const nfaRow = r => {
+      const g = groupOf(r);
+      if (g === '值班') return 4;
+      if (g === '一救') return 5;
+      if (g === '二救') return 6;
+      if (r.type === '休息') return 7;
+      const nm = (r.item || '') + ' ' + (r.label || '');
+      if (/駕訓|駕駛訓練/.test(nm) && !/大車/.test(nm)) return 13;
+      if (/公墓/.test(nm)) return 12;
+      if (/公文/.test(nm)) return 14;
+      if (r.place === '防災宣導' || /防災宣導/.test(nm)) return 8;
+      if (r.place === '水源調查' || /水源/.test(nm)) return 9;
+      if (/搶救演練/.test(nm) || r.text === '搶救演練及訓練') return 11;
+      return 10;                                       // 其他臨時勤務
+    };
+    const nfaOut = V => {
+      const msg = t => { const e = document.getElementById('smsg'); if (e) e.innerHTML = t; };
+      const btn = document.getElementById('snfa'); if (btn) btn.disabled = true;
+      msg('<span class="muted">產生消防署格式中…</span>');
+      Promise.all([needZip(), needNFA()]).then(() => {
+        const [y, m, dd] = D.date.split('-').map(Number);
+        const N = {}, COL = 'E F G H I J K L M N O P Q R S T U V W X Y Z AA AB'.split(' ');
+        const n = p => Number(p.num), cj = a => [...new Set(a.filter(Boolean).map(String))].join(',');
+        const byNum = (a, b) => Number(a) - Number(b);
+        N.S2 = `勤務日期:${y - 1911}/${pad(m)}/${pad(dd)}`;
+        N.W2 = '星期' + WEEK[new Date(D.date + 'T12:00:00+08:00').getDay()];
+        const chief = D.people.find(p => n(p) === 1 && p.code !== '離' && p.code !== '外');
+        N.X2 = '主管:' + (chief ? chief.name : '');
+        // 勤務（第 4–14 列）、備勤（第 15 列＝當時沒排勤務的在隊人員）
+        for (let h = 0; h < 24; h++) {
+          const at = {};
+          rows.forEach(r => { const v = r.cells[h]; if (v) (at[nfaRow(r)] = at[nfaRow(r)] || []).push(v); });
+          Object.entries(at).forEach(([row, list]) => { N[COL[h] + row] = cj(list); });
+          N[COL[h] + 15] = cj(standby(h).map(p => p.num).sort(byNum));
+        }
+        // 單位人員請休假表（看月班表當天的代號，同勤務表）
+        const all = D.people.concat(D.off).sort((a, b) => n(a) - n(b));
+        const pick = f => cj(all.filter(p => f(String(p.code || ''))).map(p => p.num));
+        const KNOWN = c => c[0] === '○' || ['外', '補', '超', '◎', '△', '公'].includes(c);
+        N.G16 = pick(c => c[0] === '○');                  // 輪休
+        N.O16 = pick(c => c === '外');                     // 外宿
+        N.W16 = pick(c => c === '補' || c === '超');       // 補休
+        N.G17 = cj(D.off.filter(p => !KNOWN(String(p.code || ''))).concat(D.people.filter(p => p.code === '離')).sort((a, b) => n(a) - n(b)).map(p => p.num));   // 其他假別
+        N.O17 = pick(c => c === '公');                     // 公差假
+        N.W17 = pick(c => c === '◎' || c === '△');        // 休假
+        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班的人
+        N.O18 = cj(all.filter(p => /^B/i.test(yd[p.name] || '')).map(p => p.num));
+        N.W18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((a, b) => n(a) - n(b)).map(p => p.num));   // 執勤
+        N.E20 = V.P32;                                     // 出動梯次
+        N.E21 = V.Q37;                                     // 附記
+        // 單位人員設定番號
+        const staff = D.people.concat(D.off, D.away || []).sort((a, b) => n(a) - n(b)).map(p => ({
+          num: pad(n(p)), name: p.name,
+          title: n(p) === 1 ? '分隊長' : n(p) < 10 ? '小隊長' : (/實習生|實務生|替代役/.exec(p.role || '') || ['隊員'])[0],
+        }));
+        return NFA.build(N, staff);
+      }).then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `[${D.date.replace(/-/g, '')}] 霧峰分隊勤務分配表.xlsx`;
         document.body.appendChild(a); a.click(); a.remove();
         msg('');
       }).catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
