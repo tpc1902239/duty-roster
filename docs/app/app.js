@@ -1561,8 +1561,8 @@
         N.G17 = cj(D.off.filter(p => !KNOWN(String(p.code || ''))).sort((a, b) => n(a) - n(b)).map(p => p.num));   // 其他假別＝輪休、補休、休假、公假以外（外宿、停休先不填）
         N.O17 = pick(c => c === '公');                     // 公差假
         N.W17 = pick(c => c === '◎' || c === '△');        // 休假
-        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班或值宿的人（今天有沒有上班都列）
-        N.O18 = cj(all.filter(p => { const c = yd[p.name] || '', df = defOf(c); return /^B/i.test(c) || (df && df.kind === '值班'); }).map(p => p.num));
+        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班或值宿、今天有上班的人
+        N.O18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((x, y) => n(x) - n(y)).filter(p => { const c = yd[p.name] || '', df = defOf(c); return /^B/i.test(c) || (df && df.kind === '值班'); }).map(p => p.num));
         N.W18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((a, b) => n(a) - n(b)).map(p => p.num));   // 執勤
         N.E20 = V.P32;                                     // 出動梯次
         N.E21 = V.Q37;                                     // 附記
