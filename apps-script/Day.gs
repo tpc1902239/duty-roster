@@ -175,7 +175,17 @@ function saveBlocks_(y, m) {
 
 function readDay_(y, m, d) {
   const block = saveBlocks_(y, m)[d];
-  if (!block) return null;
+  return block ? parseBlock_(block) : null;
+}
+
+/** 本月存檔區：這個月每一天的存檔（同 4.2 版存檔區，一次全部讀出來）。 */
+function getSaveMonth(token, y, m) {
+  need_(token);
+  const blocks = saveBlocks_(y, m);
+  return { days: Object.keys(blocks).map(Number).sort((a, b) => a - b).map(d => Object.assign({ d }, parseBlock_(blocks[d]))) };
+}
+
+function parseBlock_(block) {
   const out = { rows: [], people: [], memo: '', car: null, sub: null, savedBy: '', savedAt: '' };
   block.slice(1).forEach(r => {
     if (r[0] === '在隊' && r[1 + HOURS.length] === '') {

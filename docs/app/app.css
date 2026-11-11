@@ -141,3 +141,13 @@ table.drill { table-layout:fixed; width:max-content; }
 table.drill input.dt { text-align:center; width:96px; box-sizing:border-box; }
 #who label.drilled { background:#a5d6a7; color:#1f2328; border-radius:4px; padding:0 3px; }
 .drilltag { background:#a5d6a7; color:#1f2328; border-radius:4px; padding:0 3px; }
+
+/* 存檔區 */
+.saveday { padding:8px 10px; margin-bottom:10px; scroll-margin-top:90px; }
+.savehead { display:flex; gap:10px; align-items:center; margin-bottom:4px; }
+table.savegrid { border-collapse:collapse; font-size:12px; table-layout:fixed; }
+table.savegrid th, table.savegrid td { border:1px solid #8c959f; padding:1px 2px; text-align:center; width:30px; height:20px; }
+table.savegrid th.lbl { width:128px; text-align:left; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.savefoot { font-size:12px; margin-top:4px; }
+.savefoot .memo { white-space:pre-wrap; color:#57606a; }
+a.dayjump { display:inline-block; min-width:20px; text-align:center; font-size:12px; color:#1e6ee6; text-decoration:none; }
