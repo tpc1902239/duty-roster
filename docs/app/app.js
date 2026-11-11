@@ -998,6 +998,16 @@
     const range = (a, b) => [...Array(Math.max(b - a, 0))].map((_, j) => a + j);
     const pad = n => String(n).padStart(2, '0');
 
+    /** 今天要不要車輛保養：車輛表這個月有資料就看當天那一欄有沒有車；沒資料就看星期（六日不保養）。 */
+    const carDay = d => {
+      const dd = Number(d.date.slice(8)), tab = d.cars || [], head = tab[0] || [], body = tab.slice(1);
+      const ci = head.findIndex((v, i) => i >= 3 && Number(v) === dd);
+      const filled = body.some(r => r.some((v, i) => i >= 3 && String(v == null ? '' : v).trim()));
+      if (ci >= 0 && filled) return body.some(r => String(r[ci] == null ? '' : r[ci]).trim() !== '');
+      const wd = new Date(d.date + 'T12:00:00+08:00').getDay();
+      return wd !== 0 && wd !== 6;
+    };
+
     // ---- 檢查 ----
     const check = () => {
       const out = [], people = pm(), mk = {};
@@ -1068,6 +1078,8 @@
       if (many.length) add('提醒', `同時休息超過 ${D.settings.restMax} 人：${hoursText(many)}`);
       const wd = new Date(D.date + 'T12:00:00+08:00').getDay();
       if ([1, 3, 5].includes(wd) && !rows.some(r => r.item === '大隊送公文')) add('提醒', '今天星期' + WEEK[wd] + '，沒有排大隊送公文');
+      if (carDay(D) && !nums($('#car').value).length) add('提醒', '今天要車輛保養，還沒排人');
+      if (!subs().length) add('提醒', '為民服務暨深夜救護備二替還沒排人');
       marks = mk;
       return out;
     };
@@ -1212,6 +1224,11 @@
       const byKind = test => d.people.filter(p => { const df = defOf(p.code); return df && test(df); }).sort((a, b) => a.code.localeCompare(b.code)).map(p => String(p.num));
       const pick = (k, dflt) => (mode === 'draft' && draft[k] ? draft[k] : mode === 'saved' && d.saved[k] ? d.saved[k] : dflt);
       $('#car').value = pick('car', byKind(df => df.kind === '值班')).join('.');
+      // 不用保養的日子（車輛表當天沒有任何車要保養；這個月車輛表還沒資料就看星期，六日不保養）：不能輸入
+      const noCar = !carDay(d);
+      if (noCar) $('#car').value = '';
+      $('#car').disabled = !edit || noCar;
+      $('#car').placeholder = noCar ? '今天不保養' : '';
       const sb = pick('sub', []);
       $('#sub1').value = sb[0] || ''; $('#sub2').value = sb.slice(1).join('.');
       const tr = (d.trains || []).slice(1).find(r => Number(r[0]) === Number(d.date.slice(8)));
