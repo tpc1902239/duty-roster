@@ -46,6 +46,7 @@
 
   const PAGES = [
     { id: 'day', name: '排班區', show: () => true },
+    { id: 'saves', name: '存檔區', show: () => true },
     { id: 'month', name: '月班表', show: () => true },
     { id: 'shiftdefs', name: '固定排班設定', show: () => true },
     { id: 'items', name: '外勤項目設定', show: () => true },
@@ -66,7 +67,7 @@
       PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 讀取測試 ----------
@@ -393,6 +394,45 @@
           .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
       };
     }
+    load();
+  }
+
+  // ---------- 存檔區（同 4.2 版：這個月每天存檔的排班一次列出來） ----------
+
+  function pageSaves(main) {
+    main.classList.add('wide');
+    main.innerHTML = `<h1>存檔區</h1>
+      <div class="muted">這個月每一天存過檔的排班，由上往下排。按日期旁的「打開」會到排班區打開那一天（可以修改、異動）。</div>
+      <div class="card bar"><input type="month" id="mon"> <span id="jump"></span> <span id="msg" class="muted"></span></div>
+      <div id="list"></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    const groupOf = r => (['值班', '一救', '二救', '休息'].includes(r.type) ? r.type : '外勤');
+    const load = () => {
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '讀取中…'; $('#list').innerHTML = ''; $('#jump').innerHTML = '';
+      Promise.all([call('getSaveMonth', y, m), call('getColors').then(r => r.colors).catch(() => ({}))]).then(([r, C]) => {
+        $('#msg').textContent = r.days.length ? `共 ${r.days.length} 天` : '這個月還沒有存檔。';
+        const bg = c => (c ? ` style="background:${esc(c)};color:#1f2328"` : '');
+        $('#jump').innerHTML = r.days.map(x => `<a href="#d${x.d}" class="dayjump">${x.d}</a>`).join(' ');
+        $('#list').innerHTML = r.days.map(x => {
+          const date = `${y}-${String(m).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
+          const w = WEEK[new Date(date + 'T12:00:00+08:00').getDay()];
+          return `<div class="card saveday" id="d${x.d}"><div class="savehead"><b>${m}/${x.d}（${w}）</b>
+              <span class="muted">${esc(x.savedBy)} ${esc(x.savedAt)}</span> <button class="plain" data-open="${date}">打開</button></div>
+            <div class="scroll"><table class="savegrid"><tr><th></th>${HOURS.map(h => `<th>${h}</th>`).join('')}</tr>` +
+            x.rows.map(rw => `<tr><th class="lbl"${bg(C['列:' + groupOf(rw)])}>${esc(rw.label)}</th>${HOURS.map((h, i) => `<td>${esc(rw.cells[i] || '')}</td>`).join('')}</tr>`).join('') +
+            `</table></div>
+            <div class="savefoot">車輛保養：${esc((x.car || []).join('.'))}　二替：${esc((x.sub || []).join('.'))}${x.memo ? `<div class="memo">${esc(x.memo)}</div>` : ''}</div></div>`;
+        }).join('');
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    $('#mon').onchange = load;
+    $('#list').onclick = e => {
+      const b = e.target.closest('[data-open]'); if (!b) return;
+      const all = dayDrafts(); all.last = b.dataset.open; dayDrafts(all);
+      route('day');
+    };
     load();
   }
 
@@ -738,10 +778,10 @@
     const nums = t => String(t || '').split(/[.,，、\s]+/).filter(Boolean);
     const td = (r, h) => $(`#gw td[data-r="${r}"][data-h="${h}"]`);
     const busyAt = h => new Set(rows.map(r => r.cells[h]).filter(Boolean));
-    const setDirty = v => {
+    const setDirty = (v, keepDraft) => {
       dirty = v;
       if (edit) { $('#save').disabled = !v && !!(D && D.saved); $('#save').textContent = v ? '存檔 *' : '存檔'; $('#drop').disabled = !v; }
-      if (D) saveDraft();
+      if (D && !keepDraft) saveDraft();
     };
     // 還沒存檔的修改：每天一份草稿，存在瀏覽器裡
     const saveDraft = () => {
@@ -1158,10 +1198,14 @@
       $('#body').hidden = false; $('#chkout').hidden = true;
       const savedTxt = d.saved ? `<b>已存檔</b>（${esc(d.saved.savedBy)} ${esc(d.saved.savedAt)}）` : '還沒存檔';
       $('#info').innerHTML = `${esc(d.date)}（${esc(WEEK[new Date(d.date + 'T12:00:00+08:00').getDay()])}）　${savedTxt}` +
-        ({ draft: '　<b class="warnt">顯示的是還沒存檔的修改</b>，按「存檔」才會存進資料庫' + (draft && draft.version !== d.version ? '<div class="err">注意：你改這份之後，有人存過這一天，存檔會被擋下來。</div>' : ''),
-           saved: '，改完再存就是異動', fresh: d.saved ? '　現在顯示的是重新帶入的固定班，存檔會蓋掉原本的' : '　已帶入固定班和行事曆' })[mode] +
+        ({ draft: '　<b class="warnt">顯示的是還沒存檔的修改</b>，按「存檔」才會存進資料庫' +
+             (d.saved ? '　<button class="plain" id="toSaved">改看存檔的內容</button>' : ''),
+           saved: '，改完再存就是異動' + (draft ? `<div class="warnt">這台電腦還有這天沒存檔的修改（${esc(new Date(draft.at + 8 * 3600e3).toISOString().slice(5, 16).replace('T', ' '))}），現在顯示的是存檔的內容。 <button class="plain" id="toDraft">改看我沒存檔的修改</button></div>` : ''), fresh: d.saved ? '　現在顯示的是重新帶入的固定班，存檔會蓋掉原本的' : '　已帶入固定班和行事曆' })[mode] +
         (freed.length ? `<div class="err">行事曆指定人空出來、要找人代班：${esc(freed.join('、'))}</div>` : '');
-      setDirty(mode === 'draft' || (mode === 'fresh' && !!d.saved));
+      // 看存檔的內容時，這台電腦的草稿先留著（按「改看我沒存檔的修改」還能叫回來；一動到格子就會被取代）
+      setDirty(mode === 'draft' || (mode === 'fresh' && !!d.saved), mode === 'saved' && !!draft);
+      const sw = (id, m2) => { const b = $(id); if (b) b.onclick = () => start(D, m2); };
+      sw('#toSaved', 'saved'); sw('#toDraft', 'draft');
       draw(); drawAdd();
       $('#msg').textContent = done || '';
     };
@@ -1172,7 +1216,11 @@
       const drill = call('getDrill', y, m).then(r => r.rows).catch(() => []);
       return Promise.all([call('getDay', $('#date').value), table('車輛'), table('救護訓練'), drill])
         .then(([d, car, train, dr]) => Object.assign(d, { cars: car, trains: train, drill: dr }))
-        .then(d => start(d, dayDrafts()[d.date] ? 'draft' : d.saved ? 'saved' : 'fresh', done))
+        .then(d => {
+          // 有草稿也有存檔：存檔比草稿新（例如別人在別台電腦存過）就先顯示存檔
+          const dr = dayDrafts()[d.date], savedAt = d.saved && Date.parse(String(d.saved.savedAt).replace(' ', 'T') + ':00+08:00');
+          start(d, dr && !(d.saved && savedAt > dr.at) ? 'draft' : d.saved ? 'saved' : 'fresh', done);
+        })
         .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
     };
     $('#date').onchange = () => load();
