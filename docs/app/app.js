@@ -1527,7 +1527,7 @@
       if (/駕訓|駕駛訓練/.test(nm) && !/大車/.test(nm)) return 13;
       if (/公墓/.test(nm)) return 12;
       if (/公文/.test(nm)) return 14;
-      if (r.place === '防災宣導' || /防災宣導/.test(nm)) return 8;
+      if (r.place === '防災宣導' || /宣導|婦宣/.test(nm)) return 8;   // 各種宣導都放防災宣導
       if (r.place === '水源調查' || /水源/.test(nm)) return 9;
       if (/搶救演練/.test(nm) || r.text === '搶救演練及訓練') return 11;
       return 10;                                       // 其他臨時勤務
@@ -1555,15 +1555,14 @@
         // 單位人員請休假表（看月班表當天的代號，同勤務表）
         const all = D.people.concat(D.off).sort((a, b) => n(a) - n(b));
         const pick = f => cj(all.filter(p => f(String(p.code || ''))).map(p => p.num));
-        const KNOWN = c => c[0] === '○' || ['外', '補', '超', '◎', '△', '公'].includes(c);
+        const KNOWN = c => c[0] === '○' || ['補', '超', '◎', '△', '公'].includes(c);
         N.G16 = pick(c => c[0] === '○');                  // 輪休
-        N.O16 = pick(c => c === '外');                     // 外宿
         N.W16 = pick(c => c === '補' || c === '超');       // 補休
-        N.G17 = cj(D.off.filter(p => !KNOWN(String(p.code || ''))).concat(D.people.filter(p => p.code === '離')).sort((a, b) => n(a) - n(b)).map(p => p.num));   // 其他假別
+        N.G17 = cj(D.off.filter(p => !KNOWN(String(p.code || ''))).sort((a, b) => n(a) - n(b)).map(p => p.num));   // 其他假別＝輪休、補休、休假、公假以外（外宿、停休先不填）
         N.O17 = pick(c => c === '公');                     // 公差假
         N.W17 = pick(c => c === '◎' || c === '△');        // 休假
-        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班的人
-        N.O18 = cj(all.filter(p => /^B/i.test(yd[p.name] || '')).map(p => p.num));
+        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班或值宿的人（今天有沒有上班都列）
+        N.O18 = cj(all.filter(p => { const c = yd[p.name] || '', df = defOf(c); return /^B/i.test(c) || (df && df.kind === '值班'); }).map(p => p.num));
         N.W18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((a, b) => n(a) - n(b)).map(p => p.num));   // 執勤
         N.E20 = V.P32;                                     // 出動梯次
         N.E21 = V.Q37;                                     // 附記
@@ -1575,7 +1574,7 @@
         return NFA.build(N, staff);
       }).then(blob => {
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = `[${D.date.replace(/-/g, '')}] 霧峰分隊勤務分配表.xlsx`;
+        a.href = URL.createObjectURL(blob); a.download = `${D.date.replace(/-/g, '')} 霧峰分隊勤務分配表.xlsx`;   // 檔名不用 [ ]：Excel 會把中括號當成外部參照
         document.body.appendChild(a); a.click(); a.remove();
         msg('');
       }).catch(e => msg(`<span class="err">${esc(e.message)}</span>`))
