@@ -627,8 +627,14 @@
   const keywordsOf = i => String(i.keywords || '').split(/[、,，\s]+/).filter(Boolean);
   function matchItem(items, duty) {
     const t = String(duty || '');
-    return items.find(i => (keywordsOf(i).length ? keywordsOf(i) : [i.name]).some(k => k && t.includes(k)))
-      || items.find(i => i.name === '其他勤務') || items[items.length - 1];
+    const hit = i => (keywordsOf(i).length ? keywordsOf(i) : [i.name]).some(k => k && t.includes(k));
+    const first = items.find(hit);
+    // 婦宣又寫了訓練或開會（例如「婦宣訓練」）：訓練、開會優先（瑋哥 2026-11-11）
+    if (first && /婦宣/.test(first.name)) {
+      const pri = ['訓練', '開會'].map(nm => items.find(i => i.name === nm)).find(i => i && hit(i));
+      if (pri) return pri;
+    }
+    return first || items.find(i => i.name === '其他勤務') || items[items.length - 1];
   }
 
   function pageItems(main) {
@@ -1527,9 +1533,11 @@
       if (/駕訓|駕駛訓練/.test(nm) && !/大車/.test(nm)) return 13;
       if (/公墓/.test(nm)) return 12;
       if (/公文/.test(nm)) return 14;
+      // 訓練、開會先判斷，名稱有「宣導／婦宣」也不算宣導（例如婦宣訓練）
+      if (/搶救演練/.test(nm) || r.text === '搶救演練及訓練' || r.item === '訓練') return 11;
+      if (r.item === '開會' || /開會|會議/.test(nm)) return 10;
       if (r.place === '防災宣導' || /宣導|婦宣/.test(nm)) return 8;   // 各種宣導都放防災宣導
       if (r.place === '水源調查' || /水源/.test(nm)) return 9;
-      if (/搶救演練/.test(nm) || r.text === '搶救演練及訓練') return 11;
       return 10;                                       // 其他臨時勤務
     };
     const nfaOut = V => {
@@ -1552,18 +1560,7 @@
           Object.entries(at).forEach(([row, list]) => { N[COL[h] + row] = cj(list); });
           N[COL[h] + 15] = cj(standby(h).map(p => p.num).sort(byNum));
         }
-        // 單位人員請休假表（看月班表當天的代號，同勤務表）
-        const all = D.people.concat(D.off).sort((a, b) => n(a) - n(b));
-        const pick = f => cj(all.filter(p => f(String(p.code || ''))).map(p => p.num));
-        const KNOWN = c => c[0] === '○' || ['補', '超', '◎', '△', '公'].includes(c);
-        N.G16 = pick(c => c[0] === '○');                  // 輪休
-        N.W16 = pick(c => c === '補' || c === '超');       // 補休
-        N.G17 = cj(D.off.filter(p => !KNOWN(String(p.code || ''))).sort((a, b) => n(a) - n(b)).map(p => p.num));   // 其他假別＝輪休、補休、休假、公假以外（外宿、停休先不填）
-        N.O17 = pick(c => c === '公');                     // 公差假
-        N.W17 = pick(c => c === '◎' || c === '△');        // 休假
-        const yd = D.yesterday || {};                      // 深夜勤＝昨天上 B 班或值宿、今天有上班的人
-        N.O18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((x, y) => n(x) - n(y)).filter(p => { const c = yd[p.name] || '', df = defOf(c); return /^B/i.test(c) || (df && df.kind === '值班'); }).map(p => p.num));
-        N.W18 = cj(D.people.filter(p => p.code !== '離' && p.code !== '外').sort((a, b) => n(a) - n(b)).map(p => p.num));   // 執勤
+        // 單位人員請休假表不用填：消防署網站會讀自己的資料（瑋哥 2026-11-11）
         N.E20 = V.P32;                                     // 出動梯次
         N.E21 = V.Q37;                                     // 附記
         // 單位人員設定番號
