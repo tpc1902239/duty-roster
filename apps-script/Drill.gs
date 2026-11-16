@@ -1,6 +1,6 @@
 // ---------- 駕訓登記 ----------
 // 每月一頁「YYYY-MM 駕訓」：姓名、番號、應訓時數、日期1～日期4。
-// 應訓幾小時就用幾格，每格一個日期（例如「11月3日」）；排班區存檔時自動填進下一個空格，手動打的不會被蓋掉。
+// 應訓幾小時就用幾格，每格一個日期（例如「11月3日」）；排班區存檔時同步那一天：補上新排的、拿掉刪掉或換掉的，其他天不動。
 // 幹部（番號個位數）不用駕訓，不列。
 
 const DRILL_HEAD = ['姓名', '番號', '應訓時數', '日期1', '日期2', '日期3', '日期4'];
@@ -93,23 +93,34 @@ function drillTrainees_(rows) {
   return out;
 }
 
-/** 排班區存檔後：學員的駕訓日期補進「YYYY-MM 駕訓」的空格（已經有這天的就不重複）。 */
+/**
+ * 排班區存檔後：讓「YYYY-MM 駕訓」裡這一天的日期跟排班區一致。
+ * 學員少登記的補進空格；排班區刪掉或換人了，多出來的這天日期會拿掉（後面的日期往前補）。
+ * 只動這一天的日期，其他天（含手動打的）不會改。
+ */
 function drillAuto_(date, day) {
   const [y, m, d] = date.split('-').map(Number);
   const got = drillTrainees_(day.rows || []);
-  if (!Object.keys(got).length) return;
   const who = Object.fromEntries((day.people || []).map(p => [str_(p.num), str_(p.name)]));
   const label = m + '月' + d + '日';
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    if (!drillRead_(y, m) && !Object.keys(got).length) return;   // 這個月還沒有駕訓表、今天也沒駕訓
     const rows = drillRows_(y, m);
     let changed = false;
-    Object.keys(got).forEach(num => {
-      const r = rows.find(x => x.name === who[num]) || rows.find(x => x.num === num);
-      if (!r) return;
-      let missing = got[num] - r.dates.slice(0, r.need).filter(x => x === label).length;
-      for (let k = 0; k < r.need && missing > 0; k++) if (!r.dates[k]) { r.dates[k] = label; missing--; changed = true; }
+    rows.forEach(r => {
+      const num = Object.keys(got).find(n => who[n] === r.name) || (got[r.num] && !who[r.num] ? r.num : null);
+      const want = num ? got[num] : 0;
+      let have = r.dates.slice(0, r.need).filter(x => x === label).length;
+      // 多的：從後面拿掉
+      for (let k = r.need - 1; k >= 0 && have > want; k--) if (r.dates[k] === label) { r.dates[k] = ''; have--; changed = true; }
+      // 少的：補進空格
+      for (let k = 0; k < r.need && have < want; k++) if (!r.dates[k]) { r.dates[k] = label; have++; changed = true; }
+      // 中間有空格的往前補
+      const kept = r.dates.slice(0, r.need).filter(Boolean);
+      const packed = kept.concat(Array(DRILL_MAX).fill('')).slice(0, DRILL_MAX);
+      if (packed.some((x, k) => x !== (r.dates[k] || ''))) { r.dates = packed; changed = true; }
     });
     if (changed) { drillWrite_(y, m, rows); bump_(sheetName_(y, m, '駕訓')); }
   } finally {
