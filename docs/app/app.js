@@ -765,7 +765,7 @@
       <div id="body" hidden>
         <div class="dayrow">
           <div class="card daygrid"><div id="info" class="muted"></div><div class="gridwrap" id="gw" tabindex="0"></div>
-            <div class="extra">車輛保養 <input id="car" size="6" ${edit ? '' : 'disabled'}>　為民服務暨深夜救護備二替 <input id="sub1" size="3" ${edit ? '' : 'disabled'}> <input id="sub2" size="3" ${edit ? '' : 'disabled'}>　<span id="teach"></span></div>
+            <div class="extra">車輛保養 <input id="car" size="6" ${edit ? '' : 'disabled'}>　體技能教官 <input id="pe" size="3" ${edit ? '' : 'disabled'}>　為民服務暨深夜救護備二替 <input id="sub1" size="3" ${edit ? '' : 'disabled'}> <input id="sub2" size="3" ${edit ? '' : 'disabled'}>　<span id="teach"></span></div>
             ${edit ? '<p class="tools"><button class="plain" id="addR">＋ 休息列</button> <span class="muted">外勤列、第二位值班、第三位 91／92、多加的休息列可以按右邊 ✕ 刪除；點列名可以改名。</span></p>' : ''}
           </div>
           <div class="card" id="hrs"></div>
@@ -801,7 +801,7 @@
     // 還沒存檔的修改：每天一份草稿，存在瀏覽器裡
     const saveDraft = () => {
       const all = dayDrafts();
-      if (dirty) all[D.date] = { rows, memo: $('#memo').value, car: nums($('#car').value), sub: subs(), version: D.version, at: Date.now() }; else delete all[D.date];
+      if (dirty) all[D.date] = { rows, memo: $('#memo').value, car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), version: D.version, at: Date.now() }; else delete all[D.date];
       all.last = D.date;
       dayDrafts(all);
     };
@@ -998,6 +998,8 @@
     const range = (a, b) => [...Array(Math.max(b - a, 0))].map((_, j) => a + j);
     const pad = n => String(n).padStart(2, '0');
 
+    /** 今天的救護訓練（車輛／救護訓練表那一列），沒有就 undefined。 */
+    const trainOf = d => (d.trains || []).slice(1).find(r => Number(r[0]) === Number(d.date.slice(8)));
     /** 今天要不要車輛保養：車輛表這個月有資料就看當天那一欄有沒有車；沒資料就看星期（六日不保養）。 */
     const carDay = d => {
       const dd = Number(d.date.slice(8)), tab = d.cars || [], head = tab[0] || [], body = tab.slice(1);
@@ -1079,6 +1081,7 @@
       const wd = new Date(D.date + 'T12:00:00+08:00').getDay();
       if ([1, 3, 5].includes(wd) && !rows.some(r => r.item === '大隊送公文')) add('提醒', '今天星期' + WEEK[wd] + '，沒有排大隊送公文');
       if (carDay(D) && !nums($('#car').value).length) add('提醒', '今天要車輛保養，還沒排人');
+      if (!trainOf(D) && !nums($('#pe').value).length) add('提醒', '體技能教官還沒排人');
       if (!subs().length) add('提醒', '為民服務暨深夜救護備二替還沒排人');
       marks = mk;
       return out;
@@ -1229,6 +1232,11 @@
       if (noCar) $('#car').value = '';
       $('#car').disabled = !edit || noCar;
       $('#car').placeholder = noCar ? '今天不保養' : '';
+      // 體技能教官＝值宿的人（預設，可改）；有救護訓練的日子沒有體技能訓練，不能輸入
+      const noPe = !!trainOf(d);
+      $('#pe').value = noPe ? '' : pick('pe', byKind(df => df.kind === '值班').slice(0, 1)).join('.');
+      $('#pe').disabled = !edit || noPe;
+      $('#pe').placeholder = noPe ? '救護訓練' : '';
       const sb = pick('sub', []);
       $('#sub1').value = sb[0] || ''; $('#sub2').value = sb.slice(1).join('.');
       const tr = (d.trains || []).slice(1).find(r => Number(r[0]) === Number(d.date.slice(8)));
@@ -1270,7 +1278,7 @@
         dirty = false; saveDraft(); load('已放棄修改。');
       };
       $('#addR').onclick = () => { rows.push({ type: '休息', label: '休息' + (rows.filter(r => r.type === '休息').length + 1), cells: blank() }); rows = sortRows(rows); setDirty(true); draw(); };
-      $('#memo').oninput = $('#car').oninput = $('#sub1').oninput = $('#sub2').oninput = () => setDirty(true);
+      $('#memo').oninput = $('#car').oninput = $('#pe').oninput = $('#sub1').oninput = $('#sub2').oninput = () => setDirty(true);
       $('#save').onclick = () => {
         const errs = showCheck(check());
         if (errs && !confirm(`還有 ${errs} 個錯誤，仍要存檔嗎？`)) return;
@@ -1279,7 +1287,7 @@
         const day = {
           rows: rows.map(r => ({ label: r.label, cells: r.cells, type: r.type, place: r.place || '', text: r.text || '', code: r.code || '', category: r.category || '', item: r.item || '', ev: r.ev || '' })),
           people: D.people.concat(D.off.filter(p => used.has(String(p.num)))).map(p => ({ num: p.num, name: p.name, code: p.code })), memo: $('#memo').value,
-          car: nums($('#car').value), sub: subs(),
+          car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(),
         };
         call('saveDay', D.date, day, D.version)
           .then(r => { dirty = false; saveDraft(); return load(r.existed ? '已異動存檔。' : '已存檔。'); })
@@ -1340,7 +1348,7 @@
           const a = r.cells.findIndex(Boolean); if (a < 0) return;
           let b = a; while (b < 24 && r.cells[b]) b++;
           if (last && last.label === r.label && last.a === a) out += '.' + r.cells[a];
-          else { out += `  (${HOURS[a]}-${b >= 24 ? HOURS[23] : HOURS[b]}時)${r.label}:${r.cells[a]}`; last = { label: r.label, a }; }
+          else { out += `  (${HOURS[a]}-${b >= 24 ? '08' : HOURS[b]}時)${r.label}:${r.cells[a]}`; last = { label: r.label, a }; }
         });
         return out;
       };
@@ -1350,7 +1358,7 @@
       // 救護訓練時間照「車輛／救護訓練」表的時間欄（16:00-18:00 → 16-18）
       const tt = tr && String(tr[1]).match(/(\d{1,2})[:：]?(\d{2})?\s*[-~～－]\s*(\d{1,2})/);
       const tTime = tt ? `${Number(tt[1])}-${Number(tt[3])}` : '16-18';
-      V.C11 = (tr ? `(${tTime}時)救護訓練-${tr[2]}:${tr[4]}` : `(15-17時)體技能訓練:${at(firstOf('值班'), 14)}`) + lines(['搶救演練及訓練', 'C']);
+      V.C11 = (tr ? `(${tTime}時)救護訓練-${tr[2]}:${tr[4]}` : `(15-17時)體技能訓練:${nums($('#pe').value).join('.')}`) + lines(['搶救演練及訓練', 'C']);
       const head = (D.cars || [])[0] || [], ci = head.findIndex((v, i) => i >= 3 && Number(v) === dd);
       V.C12 = '保養試車 ' + (ci < 0 ? '' : (D.cars || []).slice(1).filter(r => r[ci]).map(r => `${r[2]}(${r[ci]}) `).join('')) +
         car.map(x => ':' + x).join('') + '   (0800-0815)個人裝備測試保養';
