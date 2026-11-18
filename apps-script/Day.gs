@@ -185,15 +185,18 @@ function getSaveMonth(token, y, m) {
   return { days: Object.keys(blocks).map(Number).sort((a, b) => a - b).map(d => Object.assign({ d }, parseBlock_(blocks[d]))) };
 }
 
+/** 存檔區的特殊列：列名 → 欄位（番號用「.」隔開）。 */
+const SPECIAL_ = { '車輛保養': 'car', '二替': 'sub', '體技能教官': 'pe' };
+
 function parseBlock_(block) {
-  const out = { rows: [], people: [], memo: '', car: null, sub: null, savedBy: '', savedAt: '' };
+  const out = { rows: [], people: [], memo: '', car: null, sub: null, pe: null, savedBy: '', savedAt: '' };
   block.slice(1).forEach(r => {
     if (r[0] === '在隊' && r[1 + HOURS.length] === '') {
       out.people = r[1].split('、').filter(Boolean).map(x => { const [num, name, code] = x.split('='); return { num, name, code: code || '' }; });
     } else if (r[0] === '備註' && r[1 + HOURS.length] === '') {
       out.memo = r[1];
-    } else if ((r[0] === '車輛保養' || r[0] === '二替') && r[1 + HOURS.length] === '') {
-      out[r[0] === '車輛保養' ? 'car' : 'sub'] = r[1].split('.').filter(Boolean);
+    } else if (SPECIAL_[r[0]] && r[1 + HOURS.length] === '') {
+      out[SPECIAL_[r[0]]] = r[1].split('.').filter(Boolean);
     } else if (r[0] === '存檔' && r[1 + HOURS.length] === '') {
       out.savedBy = r[1]; out.savedAt = r[2];
     } else if (r[0] !== '') {
@@ -239,6 +242,7 @@ function saveDay(token, date, day, version) {
     rows.push(pad(['備註', str_(day.memo)]));
     rows.push(pad(['車輛保養', (day.car || []).map(str_).filter(Boolean).join('.')]));
     rows.push(pad(['二替', (day.sub || []).map(str_).filter(Boolean).join('.')]));
+    rows.push(pad(['體技能教官', (day.pe || []).map(str_).filter(Boolean).join('.')]));
     rows.push(pad(['存檔', s.name || s.user, Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm')]));
     blocks[d] = rows;
     const all = [];
