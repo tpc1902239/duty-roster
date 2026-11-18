@@ -214,7 +214,7 @@ function calendarOn_(date) {
   });
 }
 
-/** 讀取測試頁：當月月班表、當天在隊／不在隊、當天日曆。 */
+/** 讀一天的資料（排班區用）：當月月班表、當天在隊／不在隊、當天日曆。 */
 function loadDay(token, date) {
   need_(token);
   const [y, m] = date.split('-').map(Number);

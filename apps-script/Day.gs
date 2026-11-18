@@ -56,7 +56,7 @@ function getItems(token) {
 }
 
 function saveItems(token, items, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'items');
   const seen = {};
   items.forEach(x => {
     ['name', 'label', 'place', 'text', 'code', 'category', 'keywords'].forEach(k => { x[k] = str_(x[k]); });
@@ -226,7 +226,7 @@ function legacyRow_(row, a) {
  * 同一天已經存過就整塊換掉（異動）。
  */
 function saveDay(token, date, day, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'day');
   const [y, m, d] = date.split('-').map(Number);
   const name = sheetName_(y, m, '存檔');
   if (!day.rows || !day.rows.length) throw new Error('沒有資料可以存');
@@ -281,7 +281,7 @@ function getColors(token) {
 }
 
 function saveColors(token, colors, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'colors');
   Object.keys(colors).forEach(k => {
     if (!/^(列|班):/.test(k)) throw new Error('不明的項目：' + k);
     if (colors[k] && !/^#[0-9a-f]{6}$/i.test(colors[k])) throw new Error(k + '：顏色格式不對');
@@ -344,7 +344,7 @@ function getSheetTemplate(token) {
 
 /** 把填好的勤務表存進「勤務表存檔／YYYY-MM／YYYY-MM-DD 勤務表.xlsx」，同一天重存會取代舊檔。 */
 function saveSheetFile(token, date, data) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'day');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期格式不對');
   const root = sheetFolder_(), ym = date.slice(0, 7);
   const it = root.getFoldersByName(ym), folder = it.hasNext() ? it.next() : root.createFolder(ym);
