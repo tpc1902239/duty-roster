@@ -74,7 +74,7 @@ function getShiftDefs(token) {
 }
 
 function saveShiftDefs(token, defs, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'shiftdefs');
   const seen = {};
   defs.forEach(d => {
     d.name = str_(d.name);
@@ -122,7 +122,7 @@ function getUnitStaff(token) {
 }
 
 function saveUnitStaff(token, staff, version) {
-  const s = need_(token, '管理員');
+  const s = need_(token, 'staff');
   const seen = {};
   staff.forEach(p => {
     p.name = str_(p.name).replace(/\s+/g, '');
@@ -166,7 +166,7 @@ function base_(y) {
 
 /** rows = [{name, 宿, A, B}]，代表 y 年 1 月到 m 月（含）的累計。 */
 function saveBase(token, y, m, rows) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'month');
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -230,7 +230,7 @@ function writeMonth_(y, m, grid) {
  * grid：{people:[{num,name}], days:[{d,weekday,codes,away}]}
  */
 function importLeave(token, y, m, grid, version) {
-  const s = need_(token, '假表承辦');
+  const s = need_(token, 'leave');
   const name = sheetName_(y, m, '月班表');
   return guarded_(name, version, () => {
     let kept = 0;
@@ -255,7 +255,7 @@ function importLeave(token, y, m, grid, version) {
 
 /** 排班的人改月班表格子：changes = [{name, d, code}]。黑格（不在隊）不能改。 */
 function saveShifts(token, y, m, changes, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'month');
   const name = sheetName_(y, m, '月班表');
   return guarded_(name, version, () => {
     const mo = month_(y, m);
@@ -325,7 +325,7 @@ function getTable(token, y, m, kind) {
 
 function saveTable(token, y, m, kind, rows, version) {
   if (!TABLES[kind]) throw new Error('不明的表：' + kind);
-  const s = need_(token, TABLES[kind]);
+  const s = need_(token, 'tables');
   const name = sheetName_(y, m, kind);
   return guarded_(name, version, () => {
     const ss = SpreadsheetApp.getActive();

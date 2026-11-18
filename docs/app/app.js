@@ -7,8 +7,19 @@
     get: k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
     set: (k, v) => { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) { /* 無痕視窗 */ } },
   };
-  let me = null;   // {token, user, name, roles}
+  let me = null;   // {token, user, name, roles, perms}
   const isAdmin = () => me && me.roles.includes('管理員');
+  // 各頁權限：'' 不可看、'看'、'改'。管理員全部都能改。舊的登入資料沒有 perms 就照角色換算（同 Auth.gs 的 permsFromRoles_）。
+  const permOf = id => {
+    if (isAdmin()) return '改';
+    if (me.perms) return me.perms[id] || '';
+    const r = x => me.roles.includes(x);
+    if (id === 'leave') return r('假表承辦') ? '改' : '';
+    if (id === 'tables') return r('車輛承辦') || r('救護訓練承辦') ? '改' : '';
+    return r('排班') && ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill'].includes(id) ? '改' : '看';
+  };
+  const canSee = id => !!permOf(id);
+  const canEdit = id => permOf(id) === '改';
   const call = (fn, ...args) => api(fn, me.token, ...args).catch(e => {
     if (/登入已過期/.test(e.message)) { logout(); }
     throw e;
@@ -29,7 +40,7 @@
       const u = app.querySelector('#u').value.trim(), p = app.querySelector('#p').value;
       const req = setup ? api('setupAdmin', u, app.querySelector('#n').value.trim(), p) : api('login', u, p);
       app.querySelector('#e').textContent = '';
-      req.then(s => { me = s; store.set('me', JSON.stringify(s)); route('month'); })
+      req.then(s => { me = s; store.set('me', JSON.stringify(s)); route(); })
          .catch(e => { app.querySelector('#e').textContent = e.message; });
     };
     app.querySelector('#go').onclick = go;
@@ -44,72 +55,38 @@
 
   // ---------- 外框 ----------
 
+  // perm：這頁可以設權限；viewOnly：只有看（存檔區本身不能改，要「打開」到排班區改）
   const PAGES = [
-    { id: 'day', name: '排班區', show: () => true },
-    { id: 'saves', name: '存檔區', show: () => true },
-    { id: 'month', name: '月班表', show: () => true },
-    { id: 'shiftdefs', name: '固定排班設定', show: () => true },
-    { id: 'items', name: '外勤項目設定', show: () => true },
-    { id: 'colors', name: '排班區顏色', show: () => true },
-    { id: 'staff', name: '編制人員', show: () => true },
-    { id: 'drill', name: '駕訓登記', show: () => true },
-    { id: 'leave', name: '匯入假表', show: () => has('假表承辦') },
-    { id: 'tables', name: '車輛／救護訓練', show: () => has('車輛承辦') || has('救護訓練承辦') },
-    { id: 'read', name: '讀取測試', show: () => true },
+    { id: 'day', name: '排班區', perm: true },
+    { id: 'saves', name: '存檔區', perm: true, viewOnly: true },
+    { id: 'month', name: '月班表', perm: true },
+    { id: 'shiftdefs', name: '固定排班設定', perm: true },
+    { id: 'items', name: '外勤項目設定', perm: true },
+    { id: 'colors', name: '排班區顏色', perm: true },
+    { id: 'staff', name: '編制人員', perm: true },
+    { id: 'drill', name: '駕訓登記', perm: true },
+    { id: 'leave', name: '匯入假表', perm: true },
+    { id: 'tables', name: '車輛／救護訓練', perm: true },
     { id: 'accounts', name: '帳號管理', show: isAdmin },
     { id: 'log', name: '操作紀錄', show: isAdmin },
     { id: 'password', name: '改密碼', show: () => true },
   ];
+  const visible = p => (p.perm ? canSee(p.id) : p.show());
 
   function route(id) {
     window.onbeforeunload = null;
+    const pages = PAGES.filter(visible);
+    if (!pages.some(p => p.id === id)) id = (pages.find(p => p.id === 'month') || pages[0]).id;
     app.innerHTML = `<header><span class="brand">智能勤務表</span><nav>${
-      PAGES.filter(p => p.show()).map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
-    }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}（${esc(me.roles.join('、'))}）</span></header><main id="main"></main>`;
+      pages.map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
+    }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}${isAdmin() ? '（管理員）' : ''}</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, read: pageRead, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
-  }
-
-  // ---------- 讀取測試 ----------
-
-  function pageRead(main) {
-    main.innerHTML = `<h1>讀取測試</h1><div class="muted">確認資料庫和日曆讀得到。這頁只讀資料。</div>
-      <div class="card"><input type="date" id="date"> <button id="go">讀取</button> <span id="msg" class="muted"></span></div><div id="out"></div>`;
-    const $ = s => main.querySelector(s);
-    $('#date').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-    $('#go').onclick = () => {
-      $('#msg').textContent = '讀取中…';
-      call('loadDay', $('#date').value).then(d => { $('#msg').textContent = ''; $('#out').innerHTML = renderDay(d); })
-        .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
-    };
-  }
-
-  function renderDay(d) {
-    const num = Object.fromEntries(d.month.people.map(p => [p.name, p.num]));
-    const ev = d.events.map(e => `<tr class="${e.unknown.length ? 'warn' : ''}">
-        <td>${esc(e.kind)}</td><td class="l">${esc(e.duty)}</td>
-        <td>${e.start == null ? '' : esc(e.start + '–' + e.end)}</td>
-        <td>${e.people.map(n => esc(num[n] + '.' + n)).join('、')}</td>
-        <td>${e.unknown.map(esc).join('、')}</td><td class="l muted">${esc(e.title)}</td></tr>`).join('');
-    const [yy, mm] = d.date.split('-').map(Number);
-    return `
-      <div class="card"><h2>${esc(d.date)} 在隊 ${d.here.length} 人</h2>
-        <div>${d.here.map(p => esc(p.num + '.' + p.name)).join('　')}</div>
-        ${d.away.length ? `<div class="muted">不在隊：${d.away.map(a => esc(a.num + '.' + a.name)).join('、')}</div>` : ''}
-      </div>
-      <div class="card"><h2>日曆</h2>
-        ${d.events.length ? `<div class="scroll"><table><tr><th>類型</th><th>勤務</th><th>時間</th><th>人員</th><th>對不到的人名</th><th>原標題</th></tr>${ev}</table></div>`
-                          : '<div class="muted">這天日曆沒有活動。</div>'}
-      </div>
-      <div class="card">${rosterTable(yy, mm, d.month.people, d.month.days.map(day => ({
-        d: Number(day.date.slice(8)), codes: day.codes.map(c => c ?? ''), away: day.codes.map(c => c == null) })),
-        { today: Number(d.date.slice(8)) })}</div>`;
+    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 共用：月班表表格 ----------
 
   const WEEK = '日一二三四五六';
-    const has = role => me.roles.includes(role) || isAdmin();
   // 番號依十位數分組上色（個位數＝幹部、1x、2x、3x、4x…），同 4.2 版月班表
   const grp = p => `g${Math.min(Math.floor(p.num / 10), 5)}`;
   const weekdayOf = (y, m, d) => WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
@@ -149,7 +126,7 @@
   const GROUP_ORDER = ['宿', 'A', 'B'];
 
   function pageMonth(main) {
-    const edit = has('排班');
+    const edit = canEdit('month');
     main.classList.add('wide');
     main.innerHTML = `<h1>月班表</h1>
       <div class="muted">${edit ? '用法跟 Excel 一樣：點格子或拖曳選範圍，直接打字、Delete 清除、Ctrl+C／Ctrl+V 複製貼上（可以從 Excel 貼一整塊），方向鍵移動；雙擊格子跳出固定排班選單。黑格不能改。改完按「儲存」。'
@@ -419,7 +396,7 @@
           const date = `${y}-${String(m).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
           const w = WEEK[new Date(date + 'T12:00:00+08:00').getDay()];
           return `<div class="card saveday" id="d${x.d}"><div class="savehead"><b>${m}/${x.d}（${w}）</b>
-              <span class="muted">${esc(x.savedBy)} ${esc(x.savedAt)}</span> <button class="plain" data-open="${date}">打開</button></div>
+              <span class="muted">${esc(x.savedBy)} ${esc(x.savedAt)}</span> ${canSee('day') ? `<button class="plain" data-open="${date}">打開</button>` : ''}</div>
             <div class="scroll"><table class="savegrid"><tr><th></th>${HOURS.map(h => `<th>${h}</th>`).join('')}</tr>` +
             x.rows.map(rw => `<tr><th class="lbl"${bg(C['列:' + groupOf(rw)])}>${esc(rw.label)}</th>${HOURS.map((h, i) => `<td>${esc(rw.cells[i] || '')}</td>`).join('')}</tr>`).join('') +
             `</table></div>
@@ -442,7 +419,7 @@
   const drillDone = r => r.dates.slice(0, r.need).filter(Boolean).length >= r.need;
 
   function pageDrill(main) {
-    const edit = has('排班');
+    const edit = canEdit('drill');
     main.innerHTML = `<h1>駕訓登記</h1>
       <div class="muted">名單是編制人員（幹部不用駕訓，不列）。應訓幾小時就有幾格，每格打一個日期；排班區存檔時，駕訓的學員（同一時段第二人）會自動填進下一個空格，手動打的不會被蓋掉。應訓時數下個月會沿用。修改後會自動存檔。</div>
       <div class="card bar"><input type="month" id="mon"> <span id="msg" class="muted"></span></div>
@@ -506,7 +483,7 @@
   const STAFF_STATUS = ['在隊', '不在隊', '算人力', '不計人力'];
 
   function pageUnitStaff(main) {
-    const edit = isAdmin();
+    const edit = canEdit('staff');
     main.innerHTML = `<h1>編制人員</h1>
       <div class="muted">分隊編制的人員和番號（取代 4.2 版的「番名」）。「限排時間」「限排勤務」是給自動填空用的限制：有勾時間的人只排那些時段，有選勤務的人只排那種勤務；都空白＝不限。</div>
       <div class="card"><div class="scroll" id="list"></div>
@@ -574,7 +551,7 @@
   const SHIFT_KINDS = ['值班', '一救', '二救', '休息'];   // 固定排班放到排班區哪一列
 
   function pageShiftDefs(main) {
-    const edit = has('排班');
+    const edit = canEdit('shiftdefs');
     main.innerHTML = `<h1>固定排班設定</h1>
       <div class="muted">月班表點格子時，只會出現這裡設定的名稱；「月班表字色」是這個班在月班表上的字的顏色（預設紅色）。時間從早上 08 到隔天 07，勾選這個班要上的小時。<br>排班區讀取當天時，會照「勤務別」和「第幾位」把人放進值班、一救、二救或休息列（例如 A1 放一救第 1 位、A2 放一救第 2 位）。勤務別選「休息」的（例如「長」）同一天可以好幾個人，也不算在已排次數。</div>
       <div class="card"><div class="scroll" id="list"></div>
@@ -638,7 +615,7 @@
   }
 
   function pageItems(main) {
-    const edit = has('排班');
+    const edit = canEdit('items');
     main.innerHTML = `<h1>外勤項目設定</h1>
       <div class="muted">排班區「新增外勤」的選單就是這張表，同 4.2 版表單 4 的選項。以後多一種勤務，在這裡新增一列就好。<br>
       <b>列名格式</b>：空白＝用名稱；有 {} 的，排班時會請你輸入內容換掉 {}（例如「水源第{}梯」輸入 8 → 水源第8梯）。<br>
@@ -706,7 +683,7 @@
   // ---------- 排班區顏色 ----------
 
   function pageColors(main) {
-    const edit = has('排班');
+    const edit = canEdit('colors');
     main.innerHTML = `<h1>排班區顏色</h1>
       <div class="muted"><b>列的顏色</b>：排班區最左邊列名那一格的底色。<b>固定班的顏色</b>：A1、B1、宿…這些人在自己班的時段、自己那一列的格子底色（同 4.2 版，一眼看得出是誰的班）。不想上色就勾「不上色」。</div>
       <div class="card"><div id="list"></div>
@@ -754,7 +731,7 @@
   const hourLabel = i => (i >= 24 ? '08' : HOURS[i]);   // 結束時間 24 = 隔天 08
 
   function pageDay(main) {
-    const edit = has('排班');
+    const edit = canEdit('day');
     main.classList.add('wide');
     main.innerHTML = `<h1>排班區</h1>
       <div class="muted">${edit ? '① 選日期（會自動讀取）→ ② 在格子裡打番號（拖曳選一段時間再打，整段一起填；也可以打姓名）、加外勤、排休息 → ③「檢查」→ ④「存檔」。已經存過的日期，讀進來就是存檔的內容，改完再存就是異動。<br>還沒存檔的修改會自動留著（換頁、關掉瀏覽器都在），按「存檔」才會存進資料庫；不要了就按「放棄修改」。'
@@ -1701,7 +1678,7 @@
       <div class="muted">上傳假表 Excel（格式同 4.2 版月班表：第 1 列番號、第 2 列姓名、A 欄日、B 欄星期）。黑色格子＝那天不在隊。<br>
       這個月已經有月班表時，已填的固定排班（A1、B1、宿…）在假表空白的格子會保留。</div>
       <div class="card"><label>月份 <input type="month" id="mon"></label>
-        <input type="file" id="file" accept=".xlsx,.xlsm"> <span id="msg" class="muted"></span></div>
+        <input type="file" id="file" accept=".xlsx,.xlsm" ${canEdit('leave') ? '' : 'disabled title="只有看的權限"'}> <span id="msg" class="muted"></span></div>
       <div class="card" id="out" hidden></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = nextMonth();
@@ -1733,11 +1710,11 @@
   // ---------- 車輛、救護訓練 ----------
 
   function pageTables(main) {
-    const kinds = [['車輛', '車輛承辦'], ['救護訓練', '救護訓練承辦']].filter(([, r]) => has(r)).map(([k]) => k);
+    const kinds = ['車輛', '救護訓練'];
     main.innerHTML = `<h1>車輛／救護訓練</h1>
       <div class="muted">上傳 Excel（格式同 4.2 版的「車輛」「救護訓練」工作表），整張取代這個月的資料。</div>
       <div class="card"><select id="kind">${kinds.map(k => `<option>${k}</option>`).join('')}</select>
-        <input type="month" id="mon"> <input type="file" id="file" accept=".xlsx,.xlsm"> <span id="msg" class="muted"></span></div>
+        <input type="month" id="mon"> <input type="file" id="file" accept=".xlsx,.xlsm" ${canEdit('tables') ? '' : 'disabled title="只有看的權限"'}> <span id="msg" class="muted"></span></div>
       <div class="card" id="out"></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
@@ -1777,10 +1754,14 @@
 
   function pageAccounts(main) {
     main.innerHTML = '<h1>帳號管理</h1><div id="list" class="muted">讀取中…</div><div id="edit"></div>';
+    const PP = PAGES.filter(p => p.perm);
+    const cell = (a, p) => (a.admin ? '改' : (a.perms || {})[p.id] || '—');
     const show = data => {
       main.querySelector('#list').innerHTML = `<div class="card"><button id="add">新增帳號</button>
-        <div class="scroll" style="margin-top:10px"><table><tr><th>帳號</th><th>姓名</th><th>角色</th><th>狀態</th><th></th></tr>${
-          data.accounts.map((a, i) => `<tr><td>${esc(a.user)}</td><td>${esc(a.name)}</td><td class="l">${esc(a.roles.join('、'))}</td>
+        <div class="muted" style="margin-top:6px">每一頁可以設「不可看／看／改」。管理員全部都能改，另外只有管理員看得到帳號管理、操作紀錄。改密碼大家都有。</div>
+        <div class="scroll" style="margin-top:10px"><table><tr><th>帳號</th><th>姓名</th><th>管理員</th>${PP.map(p => `<th>${esc(p.name)}</th>`).join('')}<th>狀態</th><th></th></tr>${
+          data.accounts.map((a, i) => `<tr class="${a.active ? '' : 'muted'}"><td>${esc(a.user)}</td><td>${esc(a.name)}</td><td>${a.admin ? '✓' : ''}</td>${
+            PP.map(p => `<td>${esc(cell(a, p))}</td>`).join('')}
             <td>${a.active ? '啟用' : '停用'}</td><td><button class="plain" data-i="${i}">修改</button></td></tr>`).join('')
         }</table></div></div>`;
       main.querySelector('#add').onclick = () => edit(data, null);
@@ -1788,19 +1769,29 @@
     };
     const edit = (data, a) => {
       const box = main.querySelector('#edit');
-      box.innerHTML = `<div class="card" style="max-width:460px"><h2>${a ? '修改帳號' : '新增帳號'}</h2>
+      const perms = (a && a.perms) || Object.fromEntries(PP.map(p => [p.id, '看']));
+      const radio = (p, v, label) => `<label><input type="radio" name="pm_${p.id}" value="${v}" ${(perms[p.id] || '') === v ? 'checked' : ''}> ${label}</label>`;
+      box.innerHTML = `<div class="card" style="max-width:560px"><h2>${a ? '修改帳號' : '新增帳號'}</h2>
         <label class="f">帳號（英文或數字）<input id="u" value="${esc(a ? a.user : '')}" ${a ? 'disabled' : ''}></label>
         <label class="f">姓名<input id="n" value="${esc(a ? a.name : '')}"></label>
-        <div class="chips">角色：${data.roles.map(r => `<label><input type="checkbox" value="${esc(r)}" ${a && a.roles.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')}</div>
+        <label class="chips"><input type="checkbox" id="adm" ${a && a.admin ? 'checked' : ''}> 管理員（全部頁面都能改，加上帳號管理、操作紀錄）</label>
+        <div id="pm"><table><tr><th>頁面</th><th colspan="3">權限</th></tr>${PP.map(p => `<tr><td class="l">${esc(p.name)}</td>
+          <td>${radio(p, '', '不可看')}</td><td>${radio(p, '看', '看')}</td><td>${p.viewOnly ? '' : radio(p, '改', '改')}</td></tr>`).join('')}</table>
+          <div style="margin:6px 0"><button class="plain" data-all="">全部不可看</button> <button class="plain" data-all="看">全部看</button> <button class="plain" data-all="改">全部改</button></div></div>
         <label class="chips"><input type="checkbox" id="act" ${!a || a.active ? 'checked' : ''}> 啟用</label>
         <label class="f">${a ? '重設密碼（不改就留空）' : '密碼（至少 8 個字）'}<input id="p" type="password" autocomplete="new-password"></label>
         <div class="err" id="e"></div><button id="save">儲存</button> <button class="plain" id="cancel">取消</button></div>`;
       const $ = s => box.querySelector(s);
+      const adm = () => { $('#pm').style.opacity = $('#adm').checked ? 0.4 : 1; box.querySelectorAll('#pm input, #pm button').forEach(x => { x.disabled = $('#adm').checked; }); };
+      $('#adm').onchange = adm; adm();
+      box.querySelectorAll('[data-all]').forEach(b => {
+        b.onclick = () => PP.forEach(p => { const v = p.viewOnly && b.dataset.all === '改' ? '看' : b.dataset.all; box.querySelector(`input[name="pm_${p.id}"][value="${v}"]`).checked = true; });
+      });
       $('#cancel').onclick = () => { box.innerHTML = ''; };
       $('#save').onclick = () => {
         call('saveAccount', {
-          user: $('#u').value.trim(), name: $('#n').value.trim(), password: $('#p').value, active: $('#act').checked,
-          roles: [...box.querySelectorAll('.chips input[value]:checked')].map(x => x.value),
+          user: $('#u').value.trim(), name: $('#n').value.trim(), password: $('#p').value, active: $('#act').checked, admin: $('#adm').checked,
+          perms: Object.fromEntries(PP.map(p => [p.id, (box.querySelector(`input[name="pm_${p.id}"]:checked`) || {}).value || ''])),
         }).then(d => { box.innerHTML = ''; show(d); }).catch(e => { $('#e').textContent = e.message; });
       };
     };
@@ -1834,6 +1825,6 @@
   // ---------- 開始 ----------
 
   try { me = JSON.parse(store.get('me')); } catch (e) { me = null; }
-  if (me && me.token) route('month');
+  if (me && me.token) route();
   else api('needsSetup').then(loginForm).catch(e => { app.textContent = '錯誤：' + e.message; });
 })();

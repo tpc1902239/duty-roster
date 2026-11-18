@@ -47,7 +47,7 @@ function getDrill(token, y, m) {
 }
 
 function saveDrill(token, y, m, rows, version) {
-  const s = need_(token, '排班');
+  const s = need_(token, 'drill');
   rows.forEach(r => {
     r.name = str_(r.name);
     r.need = Math.min(DRILL_MAX, Math.max(1, Number(r.need) || 1));
