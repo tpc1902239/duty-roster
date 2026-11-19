@@ -203,9 +203,17 @@ function calendarOn_(date) {
       const p = people.find(p => [p.name, ...p.alias].some(n => n && t.duty.includes(n)));
       if (p) t.names = [p.alias[0] || p.name];
     }
+    // 「2人」「兩人」：還沒決定是誰的人數，排班區多帶出幾列空白
+    const CN = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+    let extra = 0;
+    t.names = t.names.filter(n => {
+      const c = n.match(/^(\d+|[一二兩三四五六])\s*(人|名|員)$/);
+      if (c) extra += CN[c[1]] || Number(c[1]);
+      return !c;
+    });
     const matched = t.names.map(n => ({ name: n, person: find(n) || null }));
     return Object.assign(t, {
-      allDay: ev.isAllDayEvent(),
+      allDay: ev.isAllDayEvent(), extra,
       people: matched.filter(x => x.person).map(x => x.person.name),
       unknown: matched.filter(x => !x.person).map(x => x.name),
       // 全天事項標題有寫時間（例如「TP複訓(08-18)-于萱」）也照標題的時間排
