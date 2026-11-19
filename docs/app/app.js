@@ -752,7 +752,7 @@
           <div class="card" id="cal"></div>
           <div class="card" id="chkout" hidden></div>
           <div class="card"><h2>備註</h2>
-            <textarea id="memo" rows="8" ${edit ? '' : 'disabled'}></textarea></div>
+            <textarea id="memo" rows="8" ${edit ? '' : 'disabled'}></textarea><div class="muted" id="memoinfo"></div></div>
         </div>
       </div><div id="pop" class="picker" hidden></div>`;
     const $ = s => main.querySelector(s);
@@ -763,6 +763,9 @@
     $('#date').value = drafts.last || new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
 
     let D = null, rows = [], dirty = false, sel = null, dragging = false, editing = null, hl = '', marks = {};
+    let skip = [];          // 自動帶入的勤務被按 ✕ 刪掉的（行事曆 key 或 'doc'），之後不再自動帶入
+    let standing = true;    // 備註是不是「常態備註」（不跟日期走）；看以前已存檔的日子時是那天自己的備註
+    let memoTimer = null;
     // 外勤會排到休假的人，所以名單含休假的人（off: true）；備勤人數只算在隊的
     const pm = () => Object.fromEntries(D.people.concat(D.off.map(p => Object.assign({ off: true, status: '' }, p))).map(p => [String(p.num), p]));
     const defOf = code => D.defs.find(x => x.name === code);
@@ -778,7 +781,7 @@
     // 還沒存檔的修改：每天一份草稿，存在瀏覽器裡
     const saveDraft = () => {
       const all = dayDrafts();
-      if (dirty) all[D.date] = { rows, memo: $('#memo').value, car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), version: D.version, at: Date.now() }; else delete all[D.date];
+      if (dirty) all[D.date] = { rows, skip, memo: standing ? '' : $('#memo').value, car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), version: D.version, at: Date.now() }; else delete all[D.date];
       all.last = D.date;
       dayDrafts(all);
     };
@@ -967,8 +970,23 @@
       rows = sortRows(rows);
       return freed;
     };
+    // 星期一、三、五：外勤帶入大隊送公文 17–18（人之後再填）
+    const docDay = d => [1, 3, 5].includes(new Date(d.date + 'T12:00:00+08:00').getDay()) && d.items.some(x => x.name === '大隊送公文');
+    const putDoc = () => {
+      const doc = D.items.find(x => x.name === '大隊送公文');
+      rows.push({ type: '外勤', label: doc.label || doc.name, item: doc.name, place: doc.place, text: doc.text, code: doc.code, category: doc.category, cells: blank(), need: [HOURS.indexOf('17')], ev: 'doc' });
+      rows = sortRows(rows);
+    };
+    // 外勤列應該要有人的時段：行事曆的時段、大隊送公文 17 時；其他列至少要有一格有人
+    const needOf = r => {
+      if (r.need) return r.need;
+      if (r.ev === 'doc' || r.item === '大隊送公文') return [HOURS.indexOf('17')];
+      const ev = r.ev && (D.events || []).find(e => evKey(e) === r.ev);
+      return ev ? range(...evRange(ev)) : null;
+    };
     const addEvent = k => {
       const ev = D.events[k], freed = putEvent(ev);
+      skip = skip.filter(x => x !== evKey(ev));
       setDirty(true); draw(); drawAdd();
       $('#msg').textContent = `已加入「${ev.duty}」。` + (freed.length ? `空出來要找人代班：${freed.join('、')}。` : '');
     };
@@ -1055,6 +1073,13 @@
       if (low.length) add('提醒', `備勤人數低於下限：${low.map(h => HOURS[h] + '（' + standby(h).length + '/' + minAt(h) + '）').join('、')}`);
       const many = range(0, 24).filter(h => rows.filter(r => r.type === '休息' && r.cells[h]).length > D.settings.restMax);
       if (many.length) add('提醒', `同時休息超過 ${D.settings.restMax} 人：${hoursText(many)}`);
+      // 外勤列沒排到人：有指定時段的看那幾個小時，沒有的整列空白才算
+      rows.forEach((r, k) => {
+        if (r.type !== '外勤') return;
+        const hs = needOf(r), miss = hs ? hs.filter(h => !r.cells[h]) : r.cells.some(Boolean) ? [] : null;
+        if (miss === null) add('提醒', `外勤「${r.label}」還沒排人`);
+        else if (miss.length) add('提醒', `外勤「${r.label}」${hoursText(miss)} 時還沒排人`, miss.map(h => [k, h]));
+      });
       const wd = new Date(D.date + 'T12:00:00+08:00').getDay();
       if ([1, 3, 5].includes(wd) && !rows.some(r => r.item === '大隊送公文')) add('提醒', '今天星期' + WEEK[wd] + '，沒有排大隊送公文');
       if (carDay(D) && !nums($('#car').value).length) add('提醒', '今天要車輛保養，還沒排人');
@@ -1125,7 +1150,12 @@
     $('#gw').addEventListener('mouseover', e => { if (!dragging) return; const c = cellOf(e); if (c) { Object.assign(sel, { r1: c.r, h1: c.h }); paintSel(); } });
     $('#gw').addEventListener('click', e => {
       const del = e.target.closest('button[data-del]');
-      if (del) { rows.splice(Number(del.dataset.del), 1); sel = null; setDirty(true); draw(); return; }
+      if (del) {
+        const gone = rows.splice(Number(del.dataset.del), 1)[0];
+        const key = gone.ev || (gone.item === '大隊送公文' ? 'doc' : '');
+        if (key && !rows.some(r => r.ev === key)) skip = skip.concat(key);   // 自動帶入的被 ✕ 掉：之後不再帶
+        sel = null; setDirty(true); draw(); drawAdd(); return;
+      }
       const lbl = edit && e.target.closest('th.rl');
       if (lbl && !lbl.querySelector('input')) {
         const k = Number(lbl.dataset.row);
@@ -1188,18 +1218,21 @@
       const draft = dayDrafts()[d.date];
       if (mode === 'draft') rows = draft.rows;
       else if (mode === 'saved') rows = sortRows(d.saved.rows.map(r => Object.assign({}, r, { cells: r.cells.concat(blank()).slice(0, 24).map(String) })));
-      else {
-        rows = fixedRows().rows;
-        (d.events || []).filter(canAdd).forEach(ev => { freed = freed.concat(putEvent(ev)); });
-        // 星期一、三、五：外勤直接帶入大隊送公文 17–18（人之後再填）
-        const doc = d.items.find(x => x.name === '大隊送公文'), h17 = HOURS.indexOf('17');
-        if (doc && [1, 3, 5].includes(new Date(d.date + 'T12:00:00+08:00').getDay()) && !rows.some(r => r.item === doc.name)) {
-          rows.push({ type: '外勤', label: doc.label || doc.name, item: doc.name, place: doc.place, text: doc.text, code: doc.code, category: doc.category, cells: blank(), need: [h17], ev: '' });
-          rows = sortRows(rows);
-        }
+      else rows = fixedRows().rows;
+      skip = mode === 'draft' ? draft.skip || [] : mode === 'saved' ? d.saved.skip || [] : [];
+      // 自動帶入的勤務（行事曆、一三五大隊送公文）：沒有在排班區、也沒被 ✕ 掉的就帶進來。
+      // 新的一天全部帶；草稿或存過檔的（今天以後）只補外勤，休息不補（可能是手動改掉的）。以前的日子不動。
+      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+      const added = [];
+      if (mode === 'fresh' || d.date >= today) {
+        (d.events || []).filter(canAdd).filter(ev => (mode === 'fresh' || ev.kind !== '休息') && !isAdded(ev) && !skip.includes(evKey(ev)))
+          .forEach(ev => { freed = freed.concat(putEvent(ev)); added.push(ev.duty); });
+        if (docDay(d) && !rows.some(r => r.item === '大隊送公文') && !skip.includes('doc')) { putDoc(); added.push('大隊送公文'); }
       }
-      // 還沒存檔的日子（新的一天、或草稿裡備註是空的）帶入最近一天存檔的備註
-      $('#memo').value = mode === 'saved' ? d.saved.memo : (mode === 'draft' && draft.memo) || (d.saved ? '' : d.prevMemo || '');
+      // 備註：常態備註，除非有人改，不然一直留著；只有看以前已存檔的日子才顯示那天存的備註
+      standing = !(d.saved && mode !== 'fresh' && d.date < today);
+      $('#memo').value = standing ? d.memo.text : mode === 'draft' && draft.memo ? draft.memo : d.saved.memo;
+      $('#memoinfo').textContent = standing ? (d.memo.by ? `常態備註，${d.memo.by} ${d.memo.at} 改的；改了會自動存，每天都看得到。` : '常態備註：改了會自動存，每天都看得到。') : '這是那天存檔的備註（以前的日子）。';
       // 車輛保養＝值宿的人（直接帶入）；二替不預填（2026-11-11 瑋哥）；存過的照存檔
       const byKind = test => d.people.filter(p => { const df = defOf(p.code); return df && test(df); }).sort((a, b) => a.code.localeCompare(b.code)).map(p => String(p.num));
       const pick = (k, dflt) => (mode === 'draft' && draft[k] ? draft[k] : mode === 'saved' && d.saved[k] ? d.saved[k] : dflt);
@@ -1224,9 +1257,10 @@
         ({ draft: '　<b class="warnt">顯示的是還沒存檔的修改</b>，按「存檔」才會存進資料庫' +
              (d.saved ? '　<button class="plain" id="toSaved">改看存檔的內容</button>' : ''),
            saved: '，改完再存就是異動' + (draft ? `<div class="warnt">這台電腦還有這天沒存檔的修改（${esc(new Date(draft.at + 8 * 3600e3).toISOString().slice(5, 16).replace('T', ' '))}），現在顯示的是存檔的內容。 <button class="plain" id="toDraft">改看我沒存檔的修改</button></div>` : ''), fresh: d.saved ? '　現在顯示的是重新帶入的固定班，存檔會蓋掉原本的' : '　已帶入固定班和行事曆' })[mode] +
+        (mode !== 'fresh' && added.length ? `<div class="warnt">新帶入：${esc(added.join('、'))}（不用排就按那一列右邊的 ✕，之後就不會再帶）</div>` : '') +
         (freed.length ? `<div class="err">行事曆指定人空出來、要找人代班：${esc(freed.join('、'))}</div>` : '');
       // 看存檔的內容時，這台電腦的草稿先留著（按「改看我沒存檔的修改」還能叫回來；一動到格子就會被取代）
-      setDirty(mode === 'draft' || (mode === 'fresh' && !!d.saved), mode === 'saved' && !!draft);
+      setDirty(mode === 'draft' || (mode === 'fresh' && !!d.saved) || (mode === 'saved' && added.length > 0), mode === 'saved' && !!draft && !added.length);
       const sw = (id, m2) => { const b = $(id); if (b) b.onclick = () => start(D, m2); };
       sw('#toSaved', 'saved'); sw('#toDraft', 'draft');
       draw(); drawAdd();
@@ -1255,7 +1289,16 @@
         dirty = false; saveDraft(); load('已放棄修改。');
       };
       $('#addR').onclick = () => { rows.push({ type: '休息', label: '休息' + (rows.filter(r => r.type === '休息').length + 1), cells: blank() }); rows = sortRows(rows); setDirty(true); draw(); };
-      $('#memo').oninput = $('#car').oninput = $('#pe').oninput = $('#sub1').oninput = $('#sub2').oninput = () => setDirty(true);
+      // 常態備註：停手 1.5 秒自動存（不用按存檔）；以前日子的備註跟著那天存檔
+      $('#memo').oninput = () => {
+        if (!standing) return setDirty(true);
+        $('#memoinfo').textContent = '備註還沒存…';
+        clearTimeout(memoTimer);
+        memoTimer = setTimeout(() => call('saveMemo', $('#memo').value)
+          .then(m => { D.memo = m; $('#memoinfo').textContent = `常態備註已存（${m.by} ${m.at}），每天都看得到。`; })
+          .catch(e => { $('#memoinfo').textContent = '備註存不進去：' + e.message; }), 1500);
+      };
+      $('#car').oninput = $('#pe').oninput = $('#sub1').oninput = $('#sub2').oninput = () => setDirty(true);
       $('#save').onclick = () => {
         const errs = showCheck(check());
         if (errs && !confirm(`還有 ${errs} 個錯誤，仍要存檔嗎？`)) return;
@@ -1264,7 +1307,7 @@
         const day = {
           rows: rows.map(r => ({ label: r.label, cells: r.cells, type: r.type, place: r.place || '', text: r.text || '', code: r.code || '', category: r.category || '', item: r.item || '', ev: r.ev || '' })),
           people: D.people.concat(D.off.filter(p => used.has(String(p.num)))).map(p => ({ num: p.num, name: p.name, code: p.code })), memo: $('#memo').value,
-          car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(),
+          car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), skip,
         };
         call('saveDay', D.date, day, D.version)
           .then(r => { dirty = false; saveDraft(); return load(r.existed ? '已異動存檔。' : '已存檔。'); })
