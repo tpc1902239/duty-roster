@@ -123,7 +123,7 @@ function getDay(token, date) {
     off: (runs => off.map(p => ({ num: p.num, name: p.name, code: p.code, role: p.role, run: runs[p.name] })))(leaveRuns_(date, off.map(p => p.name), names, on)),
     away: roster.away.map(p => ({ num: p.num, name: p.name, role: p.role })),
     defs: shiftDefs_(), items: items_(), colors: colors_(), events, calendarError,
-    yesterday: yesterday_(date, names), prevMemo: prevMemo_(date),
+    yesterday: yesterday_(date, names), memo: standingMemo_() || { text: prevMemo_(date), by: '', at: '' },
     saved, version: version_(sheetName_(y, m, '存檔')),
     // 勤務表標題的「N 人」：編制人員裡在隊／算人力的人數；沒有編制人員就用月班表人數
     headcount: Object.keys(unit).length ? Object.keys(unit).filter(k => ['在隊', '算人力'].indexOf(unit[k].status) >= 0).length : roster.here.length + roster.away.length,
@@ -138,6 +138,27 @@ function getDay(token, date) {
 function yesterday_(date, names) {
   const out = {};
   try { dayRoster_(addDays_(date, -1)).here.forEach(p => { if (names.indexOf(p.code) >= 0) out[p.name] = p.code; }); } catch (e) { /* 上個月還沒有資料 */ }
+  return out;
+}
+
+/**
+ * 常態備註（分頁「常態備註」A1 內容、B1 誰改的、C1 時間）：不跟著日期走，除非有人改，不然一直留著。
+ * 還沒有這個分頁時回傳 null（改用最近一天存檔的備註）。
+ */
+function standingMemo_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName('常態備註');
+  if (!sh || sh.getLastRow() < 1) return null;
+  const v = sh.getRange(1, 1, 1, 3).getValues()[0];
+  return { text: str_(v[0]), by: str_(v[1]), at: str_(v[2]) };
+}
+
+function saveMemo(token, text) {
+  const s = need_(token, 'day');
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('常態備註') || ss.insertSheet('常態備註');
+  const out = { text: str_(text), by: s.name || s.user, at: Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm') };
+  sh.getRange(1, 1, 1, 3).setNumberFormat('@').setValues([[out.text, out.by, out.at]]);
+  log_(s.user, '修改備註', out.text.slice(0, 200));
   return out;
 }
 
@@ -189,12 +210,14 @@ function getSaveMonth(token, y, m) {
 const SPECIAL_ = { '車輛保養': 'car', '二替': 'sub', '體技能教官': 'pe' };
 
 function parseBlock_(block) {
-  const out = { rows: [], people: [], memo: '', car: null, sub: null, pe: null, savedBy: '', savedAt: '' };
+  const out = { rows: [], people: [], memo: '', car: null, sub: null, pe: null, skip: [], savedBy: '', savedAt: '' };
   block.slice(1).forEach(r => {
     if (r[0] === '在隊' && r[1 + HOURS.length] === '') {
       out.people = r[1].split('、').filter(Boolean).map(x => { const [num, name, code] = x.split('='); return { num, name, code: code || '' }; });
     } else if (r[0] === '備註' && r[1 + HOURS.length] === '') {
       out.memo = r[1];
+    } else if (r[0] === '不帶入' && r[1 + HOURS.length] === '') {
+      out.skip = str_(r[1]).split('\n').filter(Boolean);
     } else if (SPECIAL_[r[0]] && r[1 + HOURS.length] === '') {
       out[SPECIAL_[r[0]]] = r[1].split('.').filter(Boolean);
     } else if (r[0] === '存檔' && r[1 + HOURS.length] === '') {
@@ -243,6 +266,7 @@ function saveDay(token, date, day, version) {
     rows.push(pad(['車輛保養', (day.car || []).map(str_).filter(Boolean).join('.')]));
     rows.push(pad(['二替', (day.sub || []).map(str_).filter(Boolean).join('.')]));
     rows.push(pad(['體技能教官', (day.pe || []).map(str_).filter(Boolean).join('.')]));
+    rows.push(pad(['不帶入', (day.skip || []).map(str_).filter(Boolean).join('\n')]));   // 自動帶入的勤務被按 ✕ 刪掉的，下次不要再帶
     rows.push(pad(['存檔', s.name || s.user, Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd HH:mm')]));
     blocks[d] = rows;
     const all = [];
