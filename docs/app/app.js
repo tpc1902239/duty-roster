@@ -944,7 +944,7 @@
       const evs = D.events || [];
       $('#cal').innerHTML = `<h2>行事曆</h2>` + (D.calendarError ? `<div class="err">讀不到行事曆：${esc(D.calendarError)}</div>` : '') +
         (evs.length ? `<table class="cal">` + evs.map((ev, k) => `<tr><td>${ev.start === null ? '全天' : `${pad(ev.start)}–${pad(ev.end)}`}</td>
-          <td class="l">${esc(ev.duty)}${ev.people.length ? '：' + esc(ev.people.join('、')) : ''}${ev.note ? `<span class="muted">（${esc(ev.note)}）</span>` : ''}${ev.unknown.length ? `<div class="err">找不到：${esc(ev.unknown.join('、'))}</div>` : ''}</td>
+          <td class="l">${esc(ev.duty)}${ev.people.length ? '：' + esc(ev.people.join('、')) : ''}${ev.extra ? `${ev.people.length ? '＋' : '：'}${ev.extra} 人待排` : ''}${ev.note ? `<span class="muted">（${esc(ev.note)}）</span>` : ''}${ev.unknown.length ? `<div class="err">找不到：${esc(ev.unknown.join('、'))}</div>` : ''}</td>
           <td>${esc(ev.kind)}</td><td>${edit && canAdd(ev) ? (isAdded(ev) ? '<span class="ok">已加入</span>' : `<button class="plain" data-ev="${k}">加入</button>`) : ''}</td></tr>`).join('') + '</table>'
           : '<div class="muted">今天沒有行事曆事項。</div>') +
         `<div class="muted">讀取當天時會自動帶入；刪掉那一列，這裡就會變回「加入」。指定人的會整段填好，那個人原本在值班、救護的時段會空出來給別人代班（C24）。待排的加一列空的，要排的時段有斜線底。全天的事項只列出來參考。</div>`;
@@ -962,7 +962,9 @@
         return freed;
       }
       if (ev.kind === '指定人') nums.forEach(num => rows.forEach(r => { if (DUTY_TYPES.includes(r.type)) for (let h = a; h < b; h++) if (r.cells[h] === num) { r.cells[h] = ''; freed.push(`${num} ${r.type} ${HOURS[h]}`); } }));
-      (ev.kind === '指定人' && nums.length ? nums : ['']).forEach(num => {
+      // 指定的人一人一列，再加上「N人」待排的空白列；什麼都沒寫就一列空白
+      const who = (ev.kind === '指定人' ? nums : []).concat(Array(ev.extra || 0).fill(''));
+      (who.length ? who : ['']).forEach(num => {
         const cells = blank();
         if (num) for (let h = a; h < b; h++) cells[h] = num;
         rows.push({ type: '外勤', label: ev.duty, item: x.name, place: x.place, text: x.text, code: x.code, category: x.category, cells, need: num ? null : range(a, b), ev: evKey(ev) });
@@ -976,13 +978,6 @@
       const doc = D.items.find(x => x.name === '大隊送公文');
       rows.push({ type: '外勤', label: doc.label || doc.name, item: doc.name, place: doc.place, text: doc.text, code: doc.code, category: doc.category, cells: blank(), need: [HOURS.indexOf('17')], ev: 'doc' });
       rows = sortRows(rows);
-    };
-    // 外勤列應該要有人的時段：行事曆的時段、大隊送公文 17 時；其他列至少要有一格有人
-    const needOf = r => {
-      if (r.need) return r.need;
-      if (r.ev === 'doc' || r.item === '大隊送公文') return [HOURS.indexOf('17')];
-      const ev = r.ev && (D.events || []).find(e => evKey(e) === r.ev);
-      return ev ? range(...evRange(ev)) : null;
     };
     const addEvent = k => {
       const ev = D.events[k], freed = putEvent(ev);
@@ -1073,13 +1068,8 @@
       if (low.length) add('提醒', `備勤人數低於下限：${low.map(h => HOURS[h] + '（' + standby(h).length + '/' + minAt(h) + '）').join('、')}`);
       const many = range(0, 24).filter(h => rows.filter(r => r.type === '休息' && r.cells[h]).length > D.settings.restMax);
       if (many.length) add('提醒', `同時休息超過 ${D.settings.restMax} 人：${hoursText(many)}`);
-      // 外勤列沒排到人：有指定時段的看那幾個小時，沒有的整列空白才算
-      rows.forEach((r, k) => {
-        if (r.type !== '外勤') return;
-        const hs = needOf(r), miss = hs ? hs.filter(h => !r.cells[h]) : r.cells.some(Boolean) ? [] : null;
-        if (miss === null) add('提醒', `外勤「${r.label}」還沒排人`);
-        else if (miss.length) add('提醒', `外勤「${r.label}」${hoursText(miss)} 時還沒排人`, miss.map(h => [k, h]));
-      });
+      // 外勤列沒排到人：整列空白才算（時段可能臨時調整，不看原本的時段；同 4.2 版）
+      rows.forEach(r => { if (r.type === '外勤' && !r.cells.some(Boolean)) add('提醒', `外勤「${r.label}」還沒排人`); });
       const wd = new Date(D.date + 'T12:00:00+08:00').getDay();
       if ([1, 3, 5].includes(wd) && !rows.some(r => r.item === '大隊送公文')) add('提醒', '今天星期' + WEEK[wd] + '，沒有排大隊送公文');
       if (carDay(D) && !nums($('#car').value).length) add('提醒', '今天要車輛保養，還沒排人');
