@@ -16,7 +16,7 @@
     const r = x => me.roles.includes(x);
     if (id === 'leave') return r('假表承辦') ? '改' : '';
     if (id === 'tables') return r('車輛承辦') || r('救護訓練承辦') ? '改' : '';
-    return r('排班') && ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill'].includes(id) ? '改' : '看';
+    return r('排班') && ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill', 'overtime'].includes(id) ? '改' : '看';
   };
   const canSee = id => !!permOf(id);
   const canEdit = id => permOf(id) === '改';
@@ -65,6 +65,7 @@
     { id: 'colors', name: '排班區顏色', perm: true },
     { id: 'staff', name: '編制人員', perm: true },
     { id: 'drill', name: '駕訓登記', perm: true },
+    { id: 'overtime', name: '停休登記', perm: true },
     { id: 'leave', name: '匯入假表', perm: true },
     { id: 'tables', name: '車輛／救護訓練', perm: true },
     { id: 'accounts', name: '帳號管理', show: isAdmin },
@@ -81,7 +82,7 @@
       pages.map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}${isAdmin() ? '（管理員）' : ''}</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, leave: pageLeave, tables: pageTables, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, overtime: pageOvertime, leave: pageLeave, tables: pageTables, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 共用：月班表表格 ----------
@@ -474,6 +475,202 @@
         if (e.target.classList.contains('dt')) { r.dates[Number(e.target.dataset.i)] = e.target.value.trim(); setDirty(true); tr.classList.toggle('done', drillDone(r)); save(); }
       };
       window.onbeforeunload = e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
+    }
+    load();
+  }
+
+  // ---------- 停休登記（超勤時數計算） ----------
+  // 同「超勤公式版」輪休表：服勤總時數＝月班表各代號天數×時數；加班＝總時數−公務員上班時數；
+  // 剩餘超勤＝加班−滿超勤；超勤結算＝剩餘超勤−停休／補休加總（停休打負數、補休打正數）。
+
+  const OT_BLANK = '(空白)';
+
+  /** 一格月班表算幾小時：{key, hours}；key 是統計列（上班、◎…），不認得的代號 key='其他'。 */
+  function otHoursOf(D, code, away) {
+    if (away) return { key: '不在隊', hours: 0 };
+    const rule = c => D.rules.find(r => r.code === c && r.code !== OT_BLANK);
+    const blank = D.rules.find(r => r.code === OT_BLANK) || { hours: 0 };
+    if (code && rule(code)) return { key: code, hours: Number(rule(code).hours) || 0 };
+    if (!code || D.workNames.includes(code)) return { key: OT_BLANK, hours: Number(blank.hours) || 0 };
+    if (rule(code[0])) return { key: code[0], hours: Number(rule(code[0]).hours) || 0 };
+    return { key: '其他', hours: 0 };
+  }
+
+  /** 每個人的計算結果，順序同 D.ot.people。 */
+  function otCalc(D, official) {
+    const col = Object.fromEntries(D.month.people.map((p, i) => [p.name, i]));
+    const others = {};
+    const res = D.ot.people.map(p => {
+      const i = col[p.name], counts = {};
+      let total = 0;
+      if (i !== undefined) D.month.days.forEach(day => {
+        const h = otHoursOf(D, day.codes[i], day.away[i]);
+        counts[h.key] = (counts[h.key] || 0) + 1;
+        total += h.hours;
+        if (h.key === '其他') others[day.codes[i]] = (others[day.codes[i]] || 0) + 1;
+      });
+      const full = D.ot.full[p.name];
+      const sum = Object.keys(D.ot.entries).reduce((s, d) => s + (Number((D.ot.entries[d] || {})[p.name]) || 0), 0);
+      const has = i !== undefined && full !== '' && full !== undefined && official !== '';
+      const over = total - Number(official);
+      const remain = over - Number(full);
+      return { counts, total, over, full, remain, sum, final: has ? remain - sum : null, inMonth: i !== undefined };
+    });
+    return { res, others };
+  }
+
+  const fmtH = x => (x === null || x === undefined || x === '' ? '' : String(Math.round(Number(x) * 100) / 100));
+
+  function pageOvertime(main) {
+    const edit = canEdit('overtime');
+    main.classList.add('wide');
+    main.innerHTML = `<h1>停休登記</h1>
+      <div class="muted">每天每人一格：<b>停休打負數</b>（例如停休 5 小時打 -5）、<b>補休打正數</b>。格子裡淡淡的字是那天月班表的代號。
+        超勤結算 ＝ 剩餘超勤時數 − 這個月停休／補休的加總；超過警示上限變紅、小於 0 變藍。修改後會自動存檔。</div>
+      <div class="card"><input type="month" id="mon">
+        <label>公務員上班時數 <input id="off" size="4" inputmode="numeric" ${edit ? '' : 'disabled'}></label> <span id="offhint" class="muted"></span>
+        <label style="margin-left:12px">警示上限 <input id="lim" size="3" inputmode="numeric" ${edit ? '' : 'disabled'}></label>
+        <span id="msg" class="muted" style="margin-left:12px"></span></div>
+      <div class="card" id="out"></div>
+      <div class="card" id="rules"></div>`;
+    const $ = s => main.querySelector(s);
+    $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    let D = null, version = 0, dirty = false, saving = null, again = false, timer = null;
+    const official = () => ($('#off').value.trim() === '' ? '' : Number($('#off').value));
+    const limit = () => ($('#lim').value.trim() === '' ? null : Number($('#lim').value));
+
+    const save = () => {
+      clearTimeout(timer); timer = null;
+      if (saving) { again = true; return; }
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '存檔中…';
+      saving = call('saveOvertime', y, m, { official: $('#off').value.trim(), limit: $('#lim').value.trim(), entries: D.ot.entries, notes: D.ot.notes }, version).then(r => {
+        version = r.version; saving = null;
+        if (again) { again = false; return save(); }
+        dirty = false; $('#offhint').textContent = '';
+        $('#msg').textContent = '已自動存檔 ' + new Date().toTimeString().slice(0, 5);
+      }).catch(e => {
+        saving = null; again = false;
+        alert('存檔失敗：' + e.message + '\n會重新讀取最新的資料，請再改一次。');
+        load();
+      });
+    };
+    const later = () => { dirty = true; $('#msg').textContent = '尚未存檔…'; clearTimeout(timer); timer = setTimeout(save, 1200); };
+
+    const cls = f => { const L = limit(); return f === null ? '' : L !== null && f > L ? 'over' : f < 0 ? 'under' : ''; };
+    // 只更新算出來的格子，不重畫輸入框（打字不會跳掉）
+    const refresh = () => {
+      const { res, others } = otCalc(D, official());
+      res.forEach((r, k) => {
+        main.querySelectorAll(`[data-sum="${k}"]`).forEach(td => { td.textContent = r.sum ? fmtH(r.sum) : ''; });
+        main.querySelectorAll(`[data-fin="${k}"]`).forEach(td => { td.textContent = r.final === null ? '—' : fmtH(r.final); td.className = 'fin ' + cls(r.final); });
+        main.querySelectorAll(`[data-det="${k}"]`).forEach(td => {
+          const key = td.dataset.key;
+          td.textContent = key === 'total' ? r.total : key === 'over' ? (official() === '' ? '' : fmtH(r.over))
+            : key === 'full' ? fmtH(r.full) : key === 'remain' ? (r.final === null ? '' : fmtH(r.remain)) : (r.counts[key] || '');
+          if (key === 'full') td.classList.toggle('miss', r.inMonth && (r.full === '' || r.full === undefined));
+        });
+      });
+      const o = Object.keys(others);
+      $('#others').innerHTML = o.length ? '不計時數的代號：' + o.map(c => `${esc(c)}（${others[c]}）`).join('、') : '';
+    };
+
+    const draw = () => {
+      const [y, m] = ym($('#mon').value);
+      const P = D.ot.people, days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const col = Object.fromEntries(D.month.people.map((p, i) => [p.name, i]));
+      const dayOf = Object.fromEntries(D.month.days.map(x => [x.d, x]));
+      const g = p => grp({ num: Number(p.num) || 99 });
+      const dis = edit ? '' : 'disabled';
+      const head = `<tr><th rowspan="2">日</th><th rowspan="2"></th>${P.map(p => `<th class="${g(p)}">${esc(p.num)}</th>`).join('')}<th rowspan="2" class="memo">備註</th></tr>
+        <tr>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>
+        <tr class="finrow"><th colspan="2">結算</th>${P.map((p, k) => `<td data-fin="${k}" class="fin"></td>`).join('')}<th></th></tr>`;
+      let body = '';
+      for (let d = 1; d <= days; d++) {
+        const w = weekdayOf(y, m, d), day = dayOf[d], e = D.ot.entries[d] || {};
+        body += `<tr><td>${d}</td><td class="${w === '六' || w === '日' ? 'wkend' : ''}">${w}</td>` + P.map(p => {
+          const i = col[p.name], away = !day || i === undefined || day.away[i];
+          const code = day && i !== undefined ? day.codes[i] : '';
+          const v = e[p.name];
+          return `<td class="${away ? 'away' : g(p)}"><input class="ot${v < 0 ? ' neg' : v > 0 ? ' pos' : ''}" data-d="${d}" data-n="${esc(p.name)}" value="${esc(fmtH(v))}" placeholder="${esc(code)}" inputmode="decimal" ${dis}></td>`;
+        }).join('') + `<td class="memo"><input class="note" data-d="${d}" value="${esc(D.ot.notes[d] || '')}" ${dis}></td></tr>`;
+      }
+      const L = (label, key, extra = '') => `<tr class="${extra}"><th colspan="2" class="lbl">${esc(label)}</th>${P.map((p, k) => `<td data-det="${k}" data-key="${key}"></td>`).join('')}<td class="memo"></td></tr>`;
+      const ruleRows = D.rules.filter(r => r.code !== OT_BLANK).map(r => L(`${r.code}（×${r.hours}）`, r.code)).join('');
+      const blank = D.rules.find(r => r.code === OT_BLANK) || { hours: 0 };
+      const foot = `<tr class="sumrow"><th colspan="2">合計</th>${P.map((p, k) => `<td data-sum="${k}"></td>`).join('')}<td class="memo"></td></tr>
+        <tr class="finrow"><th colspan="2">超勤結算</th>${P.map((p, k) => `<td data-fin="${k}" class="fin"></td>`).join('')}<td class="memo"></td></tr>
+        <tr class="gap"><td colspan="${P.length + 3}"></td></tr>
+        ${L(`上班（×${blank.hours}）`, OT_BLANK, 'top')}${ruleRows}
+        ${L('服勤總時數', 'total', 'top')}${L('加班時數', 'over')}${L('滿超勤', 'full')}${L('剩餘超勤時數', 'remain')}`;
+      const cg = `<colgroup><col style="width:24px"><col style="width:26px">${'<col style="width:34px">'.repeat(P.length)}<col style="width:240px"></colgroup>`;
+      $('#out').innerHTML = `<div class="otwrap"><table class="roster grid ot">${cg}<thead>${head}</thead><tbody>${body}${foot}</tbody></table></div>
+        <div class="muted" id="others" style="margin-top:6px"></div>
+        <div class="muted" style="margin-top:4px">滿超勤在「匯入假表」頁確認${D.ot.fullNote ? '（' + esc(D.ot.fullNote) + '）' : '<span class="err">（這個月還沒確認，先用預設值）</span>'}。黑格＝那天不在隊，算 0 小時。</div>`;
+      refresh();
+    };
+
+    const drawRules = () => {
+      const rows = D.rules.map((r, k) => `<tr data-k="${k}"><td><input class="rc" value="${esc(r.code)}" size="5" ${edit && r.code !== OT_BLANK ? '' : 'disabled'}></td>
+        <td><input class="rh" value="${esc(r.hours)}" size="3" ${edit ? '' : 'disabled'}></td><td><input class="rn" value="${esc(r.note)}" size="24" ${edit ? '' : 'disabled'}></td>
+        <td>${edit && r.code !== OT_BLANK ? '<button class="plain del">刪除</button>' : ''}</td></tr>`).join('');
+      $('#rules').innerHTML = `<h2>時數換算</h2><div class="muted">月班表的代號一天算幾小時。「(空白)」＝上班（A／B／宿等固定班也算上班）；代號第一個字對得到也算（例如「○瑋」看「○」）；表上沒有的代號算 0。</div>
+        <table class="defs"><tr><th>代號</th><th>時數</th><th>說明</th><th></th></tr>${rows}</table>
+        ${edit ? '<p><button class="plain" id="radd">＋ 新增</button> <button id="rsave">儲存換算表</button> <span id="rmsg" class="muted"></span></p>' : ''}`;
+      if (!edit) return;
+      const read = () => [...$('#rules').querySelectorAll('tr[data-k]')].map(tr => ({ code: tr.querySelector('.rc').value.trim(), hours: tr.querySelector('.rh').value.trim(), note: tr.querySelector('.rn').value.trim() }));
+      $('#rules').querySelectorAll('.del').forEach(b => { b.onclick = () => { D.rules = read(); D.rules.splice(Number(b.closest('tr').dataset.k), 1); drawRules(); }; });
+      $('#radd').onclick = () => { D.rules = read(); D.rules.push({ code: '', hours: 0, note: '' }); drawRules(); };
+      $('#rsave').onclick = () => {
+        $('#rmsg').textContent = '儲存中…';
+        call('saveOtRules', read()).then(r => { D.rules = r.rules; drawRules(); draw(); $('#rmsg').textContent = '已儲存。'; })
+          .catch(e => { $('#rmsg').textContent = '錯誤：' + e.message; });
+      };
+    };
+
+    const load = () => {
+      const [y, m] = ym($('#mon').value);
+      $('#msg').textContent = '讀取中…';
+      return call('getOvertime', y, m).then(r => {
+        if (!r.exists) { D = null; $('#out').innerHTML = `<div class="muted">${y} 年 ${m} 月還沒有月班表，請先匯入假表。</div>`; $('#rules').innerHTML = ''; $('#msg').textContent = ''; return; }
+        D = r; version = r.version; dirty = false;
+        $('#off').value = r.ot.official === '' ? r.suggest : r.ot.official;
+        $('#offhint').textContent = r.ot.official === '' ? `（預設＝平日 ${r.suggest / 8} 天 × 8，請確認）` : '';
+        $('#lim').value = r.ot.limit;
+        draw(); drawRules(); $('#msg').textContent = '';
+      }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    };
+    $('#mon').onchange = () => { if (dirty) save(); load(); };
+    $('#lim').oninput = () => { if (D) refresh(); };
+    $('#off').oninput = () => { if (D) refresh(); };
+    if (edit) {
+      $('#lim').onchange = $('#off').onchange = () => { if (D) later(); };
+      $('#out').onchange = e => {
+        const t = e.target, d = t.dataset.d;
+        if (!D || !d) return;
+        if (t.classList.contains('note')) { D.ot.notes[d] = t.value.trim(); later(); return; }
+        if (!t.classList.contains('ot')) return;
+        const raw = t.value.trim().replace(/[－–]/g, '-').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace('．', '.');
+        const n = D.ot.entries[d] = D.ot.entries[d] || {};
+        if (raw === '' || raw === '0') delete n[t.dataset.n];
+        else if (isNaN(Number(raw))) { alert('請打數字：停休打負數（例如 -4）、補休打正數。'); t.value = fmtH(n[t.dataset.n]); return; }
+        else n[t.dataset.n] = Number(raw);
+        t.value = fmtH(n[t.dataset.n]);
+        t.classList.toggle('neg', n[t.dataset.n] < 0); t.classList.toggle('pos', n[t.dataset.n] > 0);
+        refresh(); later();
+      };
+      // Enter／上下鍵：同一個人的上一天、下一天
+      $('#out').onkeydown = e => {
+        const t = e.target;
+        if (!t.classList.contains('ot') && !t.classList.contains('note')) return;
+        const dir = e.key === 'Enter' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+        if (!dir) return;
+        e.preventDefault();
+        const sel = t.classList.contains('ot') ? `input.ot[data-n="${CSS.escape(t.dataset.n)}"][data-d="${Number(t.dataset.d) + dir}"]` : `input.note[data-d="${Number(t.dataset.d) + dir}"]`;
+        const next = $('#out').querySelector(sel);
+        if (next) { next.focus(); next.select(); } else t.blur();   // 離開格子時瀏覽器會觸發 change
+      };
+      window.onbeforeunload = e => { if (dirty) { save(); e.preventDefault(); e.returnValue = ''; } };
     }
     load();
   }
@@ -1712,10 +1909,54 @@
       這個月已經有月班表時，已填的固定排班（A1、B1、宿…）在假表空白的格子會保留。</div>
       <div class="card"><label>月份 <input type="month" id="mon"></label>
         <input type="file" id="file" accept=".xlsx,.xlsm" ${canEdit('leave') ? '' : 'disabled title="只有看的權限"'}> <span id="msg" class="muted"></span></div>
-      <div class="card" id="out" hidden></div>`;
+      <div class="card" id="out" hidden></div>
+      <div class="card" id="full"></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = nextMonth();
     let parsed = null;
+    // 滿超勤：每人一個數字，預設值一年改一次，每月匯入假表後確認一次（停休登記頁算超勤結算用）
+    const loadFull = () => {
+      const [y, m] = ym($('#mon').value);
+      const box = $('#full');
+      box.innerHTML = '<h2>滿超勤確認</h2><div class="muted">讀取中…</div>';
+      call('getOvertime', y, m).then(D => {
+        if (!D.exists) { box.innerHTML = `<h2>滿超勤確認</h2><div class="muted">${y} 年 ${m} 月還沒有月班表，匯入假表後再確認。</div>`; return; }
+        const edit = canEdit('leave');
+        const P = D.ot.people.filter(p => D.month.people.some(q => q.name === p.name));
+        // 橫的排（同月班表）：番號、姓名、滿超勤
+        const g = p => grp({ num: Number(p.num) || 99 });
+        const rows = `<tr><th>番號</th>${P.map(p => `<th class="${g(p)}">${esc(p.num)}</th>`).join('')}</tr>
+          <tr><th>姓名</th>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>
+          <tr><th>滿超勤</th>${P.map(p => { const v = D.ot.full[p.name]; return `<td class="${v === '' || v === undefined ? 'miss' : ''}"><input data-n="${esc(p.name)}" value="${esc(v ?? '')}" inputmode="numeric" ${edit ? '' : 'disabled'}></td>`; }).join('')}</tr>`;
+        box.innerHTML = `<h2>滿超勤確認（${y} 年 ${m} 月）</h2>
+          <div class="muted">停休登記頁用來算「剩餘超勤時數」。數字先帶預設值，通常一年改一次；每個月匯入假表後看一下、按「確認」就好。
+            名單照這個月的月班表：新來的人是空白（紅色），請填上；調走的人不在月班表就不會出現。留空＝不計算（例如替代役）。</div>
+          <div style="margin:6px 0">${D.ot.fullNote ? '<span class="ok">' + esc(D.ot.fullNote) + '</span>' : '<span class="err">這個月還沒確認。</span>'}</div>
+          <div class="scroll"><table class="roster otfull">${rows}</table></div>
+          ${edit ? `<p><label class="chips"><input type="checkbox" id="fdef" checked> 同時存成預設值（之後每個月自動帶入）</label></p>
+            <p><button id="fok">確認 ${m} 月滿超勤</button> <span id="fmsg" class="muted"></span></p>` : ''}`;
+        if (!edit) return;
+        box.querySelectorAll('input[data-n]').forEach(i => { i.oninput = () => i.parentNode.classList.toggle('miss', i.value.trim() === ''); });
+        $('#fok').onclick = () => {
+          const full = {};
+          let bad = '';
+          box.querySelectorAll('input[data-n]').forEach(i => {
+            const v = i.value.trim().replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+            if (v !== '' && isNaN(Number(v))) bad = i.dataset.n;
+            full[i.dataset.n] = v;
+          });
+          if (bad) { $('#fmsg').textContent = bad + '：請打數字'; return; }
+          const empty = Object.keys(full).filter(n => full[n] === '');
+          if (empty.length && !confirm(`${empty.join('、')} 沒有填滿超勤，這個月不會算他們的超勤結算。確定嗎？`)) return;
+          $('#fok').disabled = true; $('#fmsg').textContent = '儲存中…';
+          call('saveFull', y, m, full, $('#fdef').checked, D.version)
+            .then(() => loadFull())
+            .catch(e => { $('#fmsg').textContent = '錯誤：' + e.message; $('#fok').disabled = false; });
+        };
+      }).catch(e => { box.innerHTML = '<h2>滿超勤確認</h2><div class="err">錯誤：' + esc(e.message) + '</div>'; });
+    };
+    $('#mon').onchange = loadFull;
+    loadFull();
     $('#file').onchange = () => {
       const f = $('#file').files[0]; if (!f) return;
       $('#msg').textContent = '讀取中…'; $('#out').hidden = true;
@@ -1733,7 +1974,7 @@
           $('#ok').disabled = true; $('#msg').textContent = '匯入中…';
           call('getMonth', y, m)
             .then(cur => call('importLeave', y, m, { people: parsed.people, days: parsed.days }, cur.version))
-            .then(r => { $('#msg').textContent = `已匯入 ${y} 年 ${m} 月，保留固定排班 ${r.kept} 格。`; $('#out').hidden = true; })
+            .then(r => { $('#msg').textContent = `已匯入 ${y} 年 ${m} 月，保留固定排班 ${r.kept} 格。請確認下面的滿超勤。`; $('#out').hidden = true; loadFull(); })
             .catch(e => { $('#msg').textContent = '錯誤：' + e.message; $('#ok').disabled = false; });
         };
       }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
