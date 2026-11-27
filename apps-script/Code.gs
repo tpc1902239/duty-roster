@@ -17,7 +17,7 @@ function doGet() {
 
 /** 網頁能呼叫的後台功能（其他函式一律不給呼叫）。放在函式裡，因為別的 .gs 檔載入順序不一定在前面。 */
 const api_ = () => ({
-  needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, recentLog,
+  needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, deleteAccount, recentLog,
   loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable, getUnitStaff, saveUnitStaff, saveBase,
   getItems, saveItems, getDay, saveDay, saveMemo, getColors, saveColors, getSheetTemplate, saveSheetFile, getDrill, saveDrill, getSaveMonth,
   getOvertime, saveOvertime, saveFull, saveOtRules,

@@ -178,6 +178,18 @@ function saveAccount(token, acc) {
   return listAccounts(token);
 }
 
+/** 刪除帳號（只有管理員；不能刪自己）。操作紀錄、存檔上的名字會留著。 */
+function deleteAccount(token, user) {
+  const s = need_(token, '管理員');
+  user = str_(user);
+  if (user === s.user) throw new Error('不能刪除自己的帳號');
+  const a = accounts_().find(x => x.user === user);
+  if (!a) throw new Error('找不到帳號 ' + user);
+  accountSheet_().deleteRow(a.row);
+  log_(s.user, '刪除帳號', user + '（' + a.name + '）');
+  return listAccounts(token);
+}
+
 function recentLog(token, limit) {
   need_(token, '管理員');
   const sh = SpreadsheetApp.getActive().getSheetByName('操作紀錄');
