@@ -1517,9 +1517,11 @@
       return out;
     };
     // 存檔（「輸出勤務表」也會先存檔）；存完重新讀取。取消或失敗時 reject
-    const doSave = () => {
+    // before：檢查通過、開始存檔前要先做的事（輸出勤務表用來先打開勤務表，存檔在後面跑）
+    const doSave = before => {
       const errs = showCheck(check());
       if (errs && !confirm(`還有 ${errs} 個錯誤，仍要存檔嗎？`)) return Promise.reject(null);
+      if (before) before();
       $('#msg').textContent = '存檔中…';
       const used = new Set(rows.flatMap(r => r.cells).filter(Boolean));
       const day = {
@@ -1532,14 +1534,24 @@
         const ot = day.ot, names = Object.keys(ot);
         const note = (names.length ? `停補休登記：${names.map(n => n + ' ' + ot[n]).join('、')}。` : '') +
           (r.otError ? `（停補休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '');
-        return load((r.existed ? '已異動存檔。' : '已存檔。') + note);
+        // 不重新讀整天（很慢）：版本號和「已存檔」直接更新在畫面上；駕訓登記另外在背景重讀（新增勤務的「駕訓已滿」顏色用）
+        D.version = r.version;
+        D.saved = Object.assign({}, day, { rows: day.rows.map(x => Object.assign({}, x, { cells: x.cells.slice() })), savedBy: me.name, savedAt: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') });
+        start(D, 'saved', (r.existed ? '已異動存檔。' : '已存檔。') + note);
+        const [y, m] = ym(D.date);
+        call('getDrill', y, m).then(x => { D.drill = x.rows; }).catch(() => {});
       });
     };
     // 輸出勤務表＝存檔＋輸出（停休、駕訓登記跟著存檔一起更新）；只能看的人直接輸出
     $('#out').onclick = () => {
       if (!D) return;
       if (!edit) return showSheet();
-      doSave().then(() => showSheet()).catch(e => { if (e) $('#msg').textContent = '錯誤：' + e.message; });
+      // 先打開勤務表（用畫面上現在的內容），存檔在後面跑，存完在勤務表上方顯示結果
+      const note = (t, cls) => { const e = document.getElementById('ssave'); if (e) { e.className = cls; e.textContent = t; } };
+      let shown = null;
+      doSave(() => { shown = showSheet().then(() => note('存檔中…（可以先下載、列印）', 'muted')); })
+        .then(() => (shown || Promise.resolve()).then(() => note($('#msg').textContent, 'ok')))
+        .catch(e => { if (!e) return; $('#msg').textContent = '錯誤：' + e.message; (shown || Promise.resolve()).then(() => note('存檔失敗：' + e.message + '（勤務表內容還沒存進資料庫，請關掉勤務表再存一次）', 'err')); });
     };
     // 勤務表蓋在整個畫面上、直接掛在 body 底下，列印時只印它
     const sheetBox = () => {
@@ -1748,7 +1760,7 @@
         return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
       }).join('') + '</tr>').join('');
       sheetBox().innerHTML = `<div class="sheetbar noprint"><button id="sxlsx">下載 Excel</button> <button id="snfa">下載消防署格式</button> <button class="plain" id="sprint">網頁列印</button> <button class="plain" id="sclose">關閉</button>
-          <div id="smsg"></div>
+          <div id="ssave"></div><div id="smsg"></div>
           ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
         <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
       document.getElementById('sheet').scrollTop = 0;
