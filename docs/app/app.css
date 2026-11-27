@@ -183,3 +183,4 @@ table.otfull th.name { line-height:1.15; padding:4px 2px; vertical-align:top; }
 /* 在隊全體同仁（格子裡的「全」） */
 table.grid.day td.allp { background:#dbe9ff; color:#1e6ee6; font-weight:700; }
 #who label.allbox { font-weight:700; color:#1e6ee6; }
+button.danger { color:#d0021b; border-color:#d0021b; }

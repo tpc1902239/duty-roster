@@ -2141,7 +2141,8 @@
           <div style="margin:6px 0"><button class="plain" data-all="">全部不可看</button> <button class="plain" data-all="看">全部看</button> <button class="plain" data-all="改">全部改</button></div></div>
         <label class="chips"><input type="checkbox" id="act" ${!a || a.active ? 'checked' : ''}> 啟用</label>
         <label class="f">${a ? '重設密碼（不改就留空）' : '密碼（至少 8 個字）'}<input id="p" type="password" autocomplete="new-password"></label>
-        <div class="err" id="e"></div><button id="save">儲存</button> <button class="plain" id="cancel">取消</button></div>`;
+        <div class="err" id="e"></div><button id="save">儲存</button> <button class="plain" id="cancel">取消</button>
+        ${a && a.user !== me.user ? '<button class="plain danger" id="delacc" style="float:right">刪除帳號</button>' : ''}</div>`;
       const $ = s => box.querySelector(s);
       const adm = () => { $('#pm').style.opacity = $('#adm').checked ? 0.4 : 1; box.querySelectorAll('#pm input, #pm button').forEach(x => { x.disabled = $('#adm').checked; }); };
       $('#adm').onchange = adm; adm();
@@ -2149,6 +2150,10 @@
         b.onclick = () => PP.forEach(p => { const v = p.viewOnly && b.dataset.all === '改' ? '看' : b.dataset.all; box.querySelector(`input[name="pm_${p.id}"][value="${v}"]`).checked = true; });
       });
       $('#cancel').onclick = () => { box.innerHTML = ''; };
+      if ($('#delacc')) $('#delacc').onclick = () => {
+        if (!confirm(`確定要刪除帳號「${a.user}（${a.name}）」嗎？刪除後不能復原（只想讓他登不進去，取消勾選「啟用」就好）。`)) return;
+        call('deleteAccount', a.user).then(d => { box.innerHTML = ''; show(d); }).catch(e => { $('#e').textContent = e.message; });
+      };
       $('#save').onclick = () => {
         call('saveAccount', {
           user: $('#u').value.trim(), name: $('#n').value.trim(), password: $('#p').value, active: $('#act').checked, admin: $('#adm').checked,
