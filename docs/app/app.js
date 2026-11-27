@@ -65,7 +65,7 @@
     { id: 'colors', name: '排班區顏色', perm: true },
     { id: 'staff', name: '編制人員', perm: true },
     { id: 'drill', name: '駕訓登記', perm: true },
-    { id: 'overtime', name: '停休登記', perm: true },
+    { id: 'overtime', name: '停補休登記', perm: true },
     { id: 'leave', name: '匯入假表', perm: true },
     { id: 'tables', name: '車輛／救護訓練', perm: true },
     { id: 'accounts', name: '帳號管理', show: isAdmin },
@@ -524,7 +524,7 @@
   function pageOvertime(main) {
     const edit = canEdit('overtime');
     main.classList.add('wide');
-    main.innerHTML = `<h1>停休登記</h1>
+    main.innerHTML = `<h1>停補休登記</h1>
       <div class="muted">每天每人一格：<b>停休打負數</b>（例如停休 5 小時打 -5）、<b>補休打正數</b>。格子裡淡淡的字是那天月班表的代號。
         超勤結算 ＝ 剩餘超勤時數 − 這個月停休／補休的加總；超過警示上限變紅、小於 0 變藍。修改後會自動存檔。</div>
       <div class="card"><input type="month" id="mon">
@@ -592,7 +592,7 @@
           const i = col[p.name], away = !day || i === undefined || day.away[i];
           const code = day && i !== undefined ? day.codes[i] : '';
           const v = e[p.name];
-          return `<td class="${away ? 'away' : g(p)}"><input class="ot${v ? ' has' : ''}" data-d="${d}" data-n="${esc(p.name)}" value="${esc(fmtH(v))}" placeholder="${esc(code)}" inputmode="decimal" ${dis}></td>`;
+          return `<td class="${away ? 'away' : g(p)}"><input class="ot${v ? ' has' : ''}${v < 0 ? ' neg' : v > 0 ? ' pos' : ''}" data-d="${d}" data-n="${esc(p.name)}" value="${esc(fmtH(v))}" placeholder="${esc(code)}" inputmode="decimal" ${dis}></td>`;
         }).join('') + `<td class="memo"><input class="note" data-d="${d}" value="${esc(D.ot.notes[d] || '')}" ${dis}></td></tr>`;
       }
       const L = (label, key, extra = '') => `<tr class="${extra}"><th colspan="2" class="lbl">${esc(label)}</th>${P.map((p, k) => `<td data-det="${k}" data-key="${key}"></td>`).join('')}<td class="memo"></td></tr>`;
@@ -660,6 +660,7 @@
         else n[t.dataset.n] = Number(raw);
         t.value = fmtH(n[t.dataset.n]);
         t.classList.toggle('has', !!n[t.dataset.n]);
+        t.classList.toggle('neg', n[t.dataset.n] < 0); t.classList.toggle('pos', n[t.dataset.n] > 0);
         refresh(); later();
       };
       // Enter／上下鍵：同一個人的上一天、下一天
@@ -1102,7 +1103,8 @@
         const full = new Set(it().name === '駕訓' ? (D.drill || []).filter(drillDone).map(r => r.name) : []);
         const tag = p => (busy.has(String(p.num)) ? ['busy', '這段時間已經有排'] : full.has(p.name) ? ['drilled', '這個月駕訓已滿'] : ['', '']);
         const box = p => `<label class="${tag(p)[0]}" title="${tag(p)[1]}"><input type="checkbox" value="${p.num}" ${checked.has(String(p.num)) ? 'checked' : ''}>${esc(p.num)} ${esc(p.name)}${p.code && p.off ? `<small>${esc(p.code)}</small>` : ''}</label>`;
-        $('#who').innerHTML = `<label class="allbox" title="那段時間沒排其他勤務的在隊人員全部參加；休假來參加的人另外勾"><input type="checkbox" value="${ALL}" ${checked.has(ALL) ? 'checked' : ''}>${ALL_TEXT}</label>` + D.people.map(box).join('') +
+        $('#who').innerHTML = D.people.map(box).join('') +
+          `<div class="sep"></div><label class="allbox" title="那段時間沒排其他勤務的在隊人員全部參加；休假來參加的人另外勾"><input type="checkbox" value="${ALL}" ${checked.has(ALL) ? 'checked' : ''}>${ALL_TEXT}</label>` +
           (D.off.length ? `<div class="sep">休假中（外勤可以排）</div>` + D.off.map(p => box(Object.assign({ off: true }, p))).join('') : '');
       };
       // 結束時間只列起始之後的，選了起始就自動跳到下一個小時（同 4.2 版表單）
@@ -1502,12 +1504,12 @@
       $('#save').onclick = () => { doSave().catch(e => { if (e) $('#msg').textContent = '錯誤：' + e.message; }); };
     }
     // 停休登記（存檔時一起寫進停休表，以勤務表為準）：
-    //   休假的人被排勤務（休息列不算）：排幾小時扣幾小時；
-    //   休息超時：班別是「長」這種休息班的人，自己班的時段（20–08）不算，其他時段的休息全扣；其他人每天 2 小時以內不扣，超過的扣。
+    //   休假的人被排勤務（休息列不算）：停休，排幾小時記負幾小時；
+    //   休息超時（補休，正數）：班別是「長」這種休息班的人，自己班的時段（20–08）不算，其他時段的休息都算；其他人每天 2 小時以內不算，超過的算。
     const otOfDay = () => {
-      const out = {}, add = (name, x) => { if (x) out[name] = (out[name] || 0) - x; };
+      const out = {}, add = (name, x) => { if (x) out[name] = (out[name] || 0) + x; };
       const hoursOf = (k, test) => range(0, 24).filter(h => rows.some(r => test(r) && r.cells[h] === k));
-      D.off.forEach(p => add(p.name, hoursOf(String(p.num), r => r.type !== '休息').length));
+      D.off.forEach(p => add(p.name, -hoursOf(String(p.num), r => r.type !== '休息').length));   // 停休：負數
       D.people.forEach(p => {
         const rh = hoursOf(String(p.num), r => r.type === '休息'), def = defOf(p.code);
         add(p.name, def && def.kind === '休息' ? rh.filter(h => !def.hours.includes(HOURS[h])).length : Math.max(0, rh.length - (Number(D.settings.restHours) || 2)));
@@ -1528,8 +1530,8 @@
       return call('saveDay', D.date, day, D.version).then(r => {
         dirty = false; saveDraft();
         const ot = day.ot, names = Object.keys(ot);
-        const note = (names.length ? `停休登記：${names.map(n => n + ' ' + ot[n]).join('、')}。` : '') +
-          (r.otError ? `（停休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '');
+        const note = (names.length ? `停補休登記：${names.map(n => n + ' ' + ot[n]).join('、')}。` : '') +
+          (r.otError ? `（停補休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '');
         return load((r.existed ? '已異動存檔。' : '已存檔。') + note);
       });
     };
@@ -2002,7 +2004,7 @@
           <tr><th>姓名</th>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>
           <tr><th>滿超勤</th>${P.map(p => { const v = D.ot.full[p.name]; return `<td class="${v === '' || v === undefined ? 'miss' : ''}"><input data-n="${esc(p.name)}" value="${esc(v ?? '')}" inputmode="numeric" ${edit ? '' : 'disabled'}></td>`; }).join('')}</tr>`;
         box.innerHTML = `<h2>滿超勤確認（${y} 年 ${m} 月）</h2>
-          <div class="muted">停休登記頁用來算「剩餘超勤時數」。數字先帶預設值，通常一年改一次；每個月匯入假表後看一下、按「確認」就好。
+          <div class="muted">停補休登記頁用來算「剩餘超勤時數」。數字先帶預設值，通常一年改一次；每個月匯入假表後看一下、按「確認」就好。
             名單照這個月的月班表：新來的人是空白（紅色），請填上；調走的人不在月班表就不會出現。留空＝不計算（例如替代役）。</div>
           <div style="margin:6px 0">${D.ot.fullNote ? '<span class="ok">' + esc(D.ot.fullNote) + '</span>' : '<span class="err">這個月還沒確認。</span>'}</div>
           <div class="scroll"><table class="roster otfull">${rows}</table></div>

@@ -162,8 +162,9 @@ table.ot input.ot, table.ot input.note { width:100%; height:100%; border:0; padd
 table.ot input.note { text-align:left; }
 table.ot input.ot::placeholder { color:#b0b7bf; opacity:1; }
 table.ot input.ot:focus, table.ot input.note:focus { outline:2px solid #1e6ee6; outline-offset:-2px; background:var(--card); }
-table.ot input.ot.has { font-size:15px; font-weight:700; background:#ffe58a; color:#1f2328; }   /* 有打數字的格子：字大一點、底色一種 */
-table.ot td.away input.ot.has { background:#ffe58a; color:#1f2328; }
+table.ot input.ot.has { font-size:15px; font-weight:700; background:#fff1b8; }   /* 有打數字的格子：字大一點、底色一種，字色分停休／補休 */
+table.ot td.away input.ot.has { background:#fff1b8; }
+table.ot input.ot.neg, table.ot td.away input.ot.neg { color:#d0021b; } table.ot input.ot.pos, table.ot td.away input.ot.pos { color:#1a7f37; }
 table.ot td.away { background:#000; } table.ot td.away input.ot::placeholder { color:#000; } table.ot td.away input.ot { color:#fff; }
 table.ot td.memo { text-align:left; }
 table.ot td.fin { font-weight:700; font-size:12px; }
