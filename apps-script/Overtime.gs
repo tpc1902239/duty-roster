@@ -237,3 +237,31 @@ function saveOtRules(token, rules) {
   log_(s.user, '超勤時數換算', rules.map(r => r.code + '=' + r.hours).join('、'));
   return { rules: otRules_() };
 }
+
+/**
+ * 排班區存檔時呼叫：把這一天的停休時數（休假的人被排勤務、休息超過的時數，都是負數）寫進「YYYY-MM 停休」。
+ * 以勤務表為準：這一天整天換掉（之前手動打的那天也會被蓋掉，瑋哥 2026-11-27 同意）。ot = {姓名: 時數}。
+ */
+function otDayAuto_(date, ot, s) {
+  const [y, m, d] = date.split('-').map(Number);
+  if (!SpreadsheetApp.getActive().getSheetByName(sheetName_(y, m, '月班表'))) return 0;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const cur = otCurrent_(y, m);
+    const day = {};
+    Object.keys(ot || {}).forEach(n => {
+      const x = Number(ot[n]);
+      if (!x || isNaN(x)) return;
+      day[n] = x;
+      if (!cur.people.some(p => p.name === n)) cur.people.push({ name: n, num: '' });
+    });
+    const before = JSON.stringify(cur.entries[d] || {});
+    if (Object.keys(day).length) cur.entries[d] = day; else delete cur.entries[d];
+    if (JSON.stringify(cur.entries[d] || {}) === before && cur.saved) return Object.keys(day).length;
+    otWrite_(y, m, cur);
+    bump_(sheetName_(y, m, '停休'));   // 開著停休登記頁的人存檔時會被擋下、重新讀取，不會蓋掉這次的結果
+    log_(s.user, '停休登記（排班區）', date + '：' + (Object.keys(day).map(n => n + ' ' + day[n]).join('、') || '清空'));
+    return Object.keys(day).length;
+  } finally { lock.releaseLock(); }
+}

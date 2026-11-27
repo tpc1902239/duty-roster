@@ -532,6 +532,7 @@
         <label style="margin-left:12px">警示上限 <input id="lim" size="3" inputmode="numeric" ${edit ? '' : 'disabled'}></label>
         <span id="msg" class="muted" style="margin-left:12px"></span></div>
       <div class="card" id="out"></div>
+      <div class="card" id="calc"></div>
       <div class="card" id="rules"></div>`;
     const $ = s => main.querySelector(s);
     $('#mon').value = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
@@ -583,8 +584,7 @@
       const g = p => grp({ num: Number(p.num) || 99 });
       const dis = edit ? '' : 'disabled';
       const head = `<tr><th rowspan="2">日</th><th rowspan="2"></th>${P.map(p => `<th class="${g(p)}">${esc(p.num)}</th>`).join('')}<th rowspan="2" class="memo">備註</th></tr>
-        <tr>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>
-        <tr class="finrow"><th colspan="2">結算</th>${P.map((p, k) => `<td data-fin="${k}" class="fin"></td>`).join('')}<th></th></tr>`;
+        <tr>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>`;
       let body = '';
       for (let d = 1; d <= days; d++) {
         const w = weekdayOf(y, m, d), day = dayOf[d], e = D.ot.entries[d] || {};
@@ -592,19 +592,22 @@
           const i = col[p.name], away = !day || i === undefined || day.away[i];
           const code = day && i !== undefined ? day.codes[i] : '';
           const v = e[p.name];
-          return `<td class="${away ? 'away' : g(p)}"><input class="ot${v < 0 ? ' neg' : v > 0 ? ' pos' : ''}" data-d="${d}" data-n="${esc(p.name)}" value="${esc(fmtH(v))}" placeholder="${esc(code)}" inputmode="decimal" ${dis}></td>`;
+          return `<td class="${away ? 'away' : g(p)}"><input class="ot${v ? ' has' : ''}" data-d="${d}" data-n="${esc(p.name)}" value="${esc(fmtH(v))}" placeholder="${esc(code)}" inputmode="decimal" ${dis}></td>`;
         }).join('') + `<td class="memo"><input class="note" data-d="${d}" value="${esc(D.ot.notes[d] || '')}" ${dis}></td></tr>`;
       }
       const L = (label, key, extra = '') => `<tr class="${extra}"><th colspan="2" class="lbl">${esc(label)}</th>${P.map((p, k) => `<td data-det="${k}" data-key="${key}"></td>`).join('')}<td class="memo"></td></tr>`;
       const ruleRows = D.rules.filter(r => r.code !== OT_BLANK).map(r => L(`${r.code}（×${r.hours}）`, r.code)).join('');
       const blank = D.rules.find(r => r.code === OT_BLANK) || { hours: 0 };
       const foot = `<tr class="sumrow"><th colspan="2">合計</th>${P.map((p, k) => `<td data-sum="${k}"></td>`).join('')}<td class="memo"></td></tr>
-        <tr class="finrow"><th colspan="2">超勤結算</th>${P.map((p, k) => `<td data-fin="${k}" class="fin"></td>`).join('')}<td class="memo"></td></tr>
-        <tr class="gap"><td colspan="${P.length + 3}"></td></tr>
-        ${L(`上班（×${blank.hours}）`, OT_BLANK, 'top')}${ruleRows}
+        <tr class="finrow"><th colspan="2">超勤結算</th>${P.map((p, k) => `<td data-fin="${k}" class="fin"></td>`).join('')}<td class="memo"></td></tr>`;
+      // 時數計算另外一區（給算超勤的人看，排班用不到）
+      const calcHead = `<tr><th colspan="2" rowspan="2"></th>${P.map(p => `<th class="${g(p)}">${esc(p.num)}</th>`).join('')}<th rowspan="2" class="memo"></th></tr>
+        <tr>${P.map(p => `<th class="${g(p)} name">${[...p.name].map(esc).join('<br>')}</th>`).join('')}</tr>`;
+      const calc = `${L(`上班（×${blank.hours}）`, OT_BLANK)}${ruleRows}
         ${L('服勤總時數', 'total', 'top')}${L('加班時數', 'over')}${L('滿超勤', 'full')}${L('剩餘超勤時數', 'remain')}`;
       const cg = `<colgroup><col style="width:24px"><col style="width:26px">${'<col style="width:34px">'.repeat(P.length)}<col style="width:240px"></colgroup>`;
-      $('#out').innerHTML = `<div class="otwrap"><table class="roster grid ot">${cg}<thead>${head}</thead><tbody>${body}${foot}</tbody></table></div>
+      $('#out').innerHTML = `<div class="otwrap"><table class="roster grid ot">${cg}<thead>${head}</thead><tbody>${body}${foot}</tbody></table></div>`;
+      $('#calc').innerHTML = `<h2>時數計算</h2><div class="scroll"><table class="roster grid ot otcalc">${cg}<thead>${calcHead}</thead><tbody>${calc}</tbody></table></div>
         <div class="muted" id="others" style="margin-top:6px"></div>
         <div class="muted" style="margin-top:4px">滿超勤在「匯入假表」頁確認${D.ot.fullNote ? '（' + esc(D.ot.fullNote) + '）' : '<span class="err">（這個月還沒確認，先用預設值）</span>'}。黑格＝那天不在隊，算 0 小時。</div>`;
       refresh();
@@ -656,13 +659,20 @@
         else if (isNaN(Number(raw))) { alert('請打數字：停休打負數（例如 -4）、補休打正數。'); t.value = fmtH(n[t.dataset.n]); return; }
         else n[t.dataset.n] = Number(raw);
         t.value = fmtH(n[t.dataset.n]);
-        t.classList.toggle('neg', n[t.dataset.n] < 0); t.classList.toggle('pos', n[t.dataset.n] > 0);
+        t.classList.toggle('has', !!n[t.dataset.n]);
         refresh(); later();
       };
       // Enter／上下鍵：同一個人的上一天、下一天
       $('#out').onkeydown = e => {
         const t = e.target;
         if (!t.classList.contains('ot') && !t.classList.contains('note')) return;
+        // 左右鍵：同一天的前一個人、後一個人
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const td = t.closest('td'), sib = e.key === 'ArrowLeft' ? td.previousElementSibling : td.nextElementSibling;
+          const to = sib && sib.querySelector('input:not([disabled])');
+          if (to) { e.preventDefault(); to.focus(); to.select(); }
+          return;
+        }
         const dir = e.key === 'Enter' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
         if (!dir) return;
         e.preventDefault();
@@ -925,6 +935,8 @@
 
   const FIXED_TYPES = ['值班', '一救', '二救', '休息'];
   const DUTY_TYPES = ['值班', '一救', '二救'];
+  // 「在隊全體同仁」：格子裡打「全」＝那段時間沒排其他勤務的在隊人員全部參加（不算某一個人，不檢查重複、不扣備勤）
+  const ALL = '全', ALL_TEXT = '在隊全體同仁';
   const hourLabel = i => (i >= 24 ? '08' : HOURS[i]);   // 結束時間 24 = 隔天 08
 
   function pageDay(main) {
@@ -969,7 +981,7 @@
     const blank = () => Array(24).fill('');
     const nums = t => String(t || '').split(/[.,，、\s]+/).filter(Boolean);
     const td = (r, h) => $(`#gw td[data-r="${r}"][data-h="${h}"]`);
-    const busyAt = h => new Set(rows.map(r => r.cells[h]).filter(Boolean));
+    const busyAt = h => new Set(rows.map(r => r.cells[h]).filter(v => v && v !== ALL));
     const setDirty = (v, keepDraft) => {
       dirty = v;
       if (edit) { $('#save').disabled = !v && !!(D && D.saved); $('#save').textContent = v ? '存檔 *' : '存檔'; $('#drop').disabled = !v; }
@@ -1014,6 +1026,7 @@
     const cellClass = (r, h) => {
       const v = rows[r].cells[h]; if (!v) return rows[r].need && rows[r].need.includes(h) ? 'need' : '';
       const c = [];
+      if (v === ALL) return 'allp' + (marks[r + ',' + h] ? ' err' : '');
       const who = pm()[v];
       if (!who || (who.off && FIXED_TYPES.includes(rows[r].type))) c.push('bad');
       else if (who.off) c.push('offp');
@@ -1042,7 +1055,7 @@
           const nth = rows.slice(0, k).filter(x => x.type === r.type).length;   // 這一類的第幾列（0 起）
           const extra = !FIXED_TYPES.includes(r.type) || (r.type === '休息' && nth >= 4);
           return `<tr class="t-${g}${first ? ' first' : ''}${FIXED_TYPES.includes(r.type) ? '' : ' sub'}"><th class="lbl rl" data-row="${k}"${bg(C['列:' + g])} title="${esc(r.item ? r.item + (r.category ? '／' + r.category : '') : r.type)}">${esc(r.label)}</th>` +
-            r.cells.map((v, h) => `<td data-r="${k}" data-h="${h}" class="${cellClass(k, h)}"${cellBg(r, h, v)} title="${esc(v && people[v] ? people[v].name + '（' + (people[v].code || '空白') + (people[v].off ? '，休假中' : '') + '）' : v ? '不在今天的名單' : '')}">${esc(v)}</td>`).join('') +
+            r.cells.map((v, h) => `<td data-r="${k}" data-h="${h}" class="${cellClass(k, h)}"${cellBg(r, h, v)} title="${esc(v === ALL ? ALL_TEXT : v && people[v] ? people[v].name + '（' + (people[v].code || '空白') + (people[v].off ? '，休假中' : '') + '）' : v ? '不在今天的名單' : '')}">${esc(v)}</td>`).join('') +
             `<td>${edit && extra ? `<button class="x" data-del="${k}" title="刪除這列">✕</button>` : ''}</td></tr>`;
         }).join('') + '</table>';
       w.scrollLeft = left;
@@ -1060,7 +1073,7 @@
     // ---- 每人時數（同 4.2 版 AA 欄：值班＋救護＋外勤，不含休息） ----
     const drawHours = () => {
       const hrs = {}, rest = {};
-      rows.forEach(r => r.cells.forEach(v => { if (!v) return; (r.type === '休息' ? rest : hrs)[v] = ((r.type === '休息' ? rest : hrs)[v] || 0) + 1; }));
+      rows.forEach(r => r.cells.forEach(v => { if (!v || v === ALL) return; (r.type === '休息' ? rest : hrs)[v] = ((r.type === '休息' ? rest : hrs)[v] || 0) + 1; }));
       const C = D.colors || {}, yd = D.yesterday || {};
       $('#hrs').innerHTML = `<h2>今天在隊 ${D.people.length} 人</h2><div class="muted">點一列，格子裡這個人會標出來。</div>
         <table class="hours"><tr><th>番號</th><th>姓名</th><th>班別</th><th>時數</th><th>休息</th><th title="昨天的班別">昨日</th></tr>` +
@@ -1089,7 +1102,7 @@
         const full = new Set(it().name === '駕訓' ? (D.drill || []).filter(drillDone).map(r => r.name) : []);
         const tag = p => (busy.has(String(p.num)) ? ['busy', '這段時間已經有排'] : full.has(p.name) ? ['drilled', '這個月駕訓已滿'] : ['', '']);
         const box = p => `<label class="${tag(p)[0]}" title="${tag(p)[1]}"><input type="checkbox" value="${p.num}" ${checked.has(String(p.num)) ? 'checked' : ''}>${esc(p.num)} ${esc(p.name)}${p.code && p.off ? `<small>${esc(p.code)}</small>` : ''}</label>`;
-        $('#who').innerHTML = D.people.map(box).join('') +
+        $('#who').innerHTML = `<label class="allbox" title="那段時間沒排其他勤務的在隊人員全部參加；休假來參加的人另外勾"><input type="checkbox" value="${ALL}" ${checked.has(ALL) ? 'checked' : ''}>${ALL_TEXT}</label>` + D.people.map(box).join('') +
           (D.off.length ? `<div class="sep">休假中（外勤可以排）</div>` + D.off.map(p => box(Object.assign({ off: true }, p))).join('') : '');
       };
       // 結束時間只列起始之後的，選了起始就自動跳到下一個小時（同 4.2 版表單）
@@ -1207,7 +1220,7 @@
       // 重複、不在隊
       for (let h = 0; h < 24; h++) {
         const at = {};
-        rows.forEach((r, k) => { const v = r.cells[h]; if (v) (at[v] = at[v] || []).push(k); });
+        rows.forEach((r, k) => { const v = r.cells[h]; if (v && v !== ALL) (at[v] = at[v] || []).push(k); });
         Object.entries(at).forEach(([v, ks]) => {
           if (!people[v]) add('錯誤', `${HOURS[h]} 時：${v} 不在今天的名單`, ks.map(k => [k, h]));
           else if (people[v].off) {
@@ -1486,22 +1499,46 @@
           .catch(e => { $('#memoinfo').textContent = '備註存不進去：' + e.message; }), 1500);
       };
       $('#car').oninput = $('#pe').oninput = $('#sub1').oninput = $('#sub2').oninput = () => setDirty(true);
-      $('#save').onclick = () => {
-        const errs = showCheck(check());
-        if (errs && !confirm(`還有 ${errs} 個錯誤，仍要存檔嗎？`)) return;
-        $('#msg').textContent = '存檔中…';
-        const used = new Set(rows.flatMap(r => r.cells).filter(Boolean));
-        const day = {
-          rows: rows.map(r => ({ label: r.label, cells: r.cells, type: r.type, place: r.place || '', text: r.text || '', code: r.code || '', category: r.category || '', item: r.item || '', ev: r.ev || '' })),
-          people: D.people.concat(D.off.filter(p => used.has(String(p.num)))).map(p => ({ num: p.num, name: p.name, code: p.code })), memo: $('#memo').value,
-          car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), skip,
-        };
-        call('saveDay', D.date, day, D.version)
-          .then(r => { dirty = false; saveDraft(); return load(r.existed ? '已異動存檔。' : '已存檔。'); })
-          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
-      };
+      $('#save').onclick = () => { doSave().catch(e => { if (e) $('#msg').textContent = '錯誤：' + e.message; }); };
     }
-    $('#out').onclick = () => { if (D) showSheet(); };
+    // 停休登記（存檔時一起寫進停休表，以勤務表為準）：
+    //   休假的人被排勤務（休息列不算）：排幾小時扣幾小時；
+    //   休息超時：班別是「長」這種休息班的人，自己班的時段（20–08）不算，其他時段的休息全扣；其他人每天 2 小時以內不扣，超過的扣。
+    const otOfDay = () => {
+      const out = {}, add = (name, x) => { if (x) out[name] = (out[name] || 0) - x; };
+      const hoursOf = (k, test) => range(0, 24).filter(h => rows.some(r => test(r) && r.cells[h] === k));
+      D.off.forEach(p => add(p.name, hoursOf(String(p.num), r => r.type !== '休息').length));
+      D.people.forEach(p => {
+        const rh = hoursOf(String(p.num), r => r.type === '休息'), def = defOf(p.code);
+        add(p.name, def && def.kind === '休息' ? rh.filter(h => !def.hours.includes(HOURS[h])).length : Math.max(0, rh.length - (Number(D.settings.restHours) || 2)));
+      });
+      return out;
+    };
+    // 存檔（「輸出勤務表」也會先存檔）；存完重新讀取。取消或失敗時 reject
+    const doSave = () => {
+      const errs = showCheck(check());
+      if (errs && !confirm(`還有 ${errs} 個錯誤，仍要存檔嗎？`)) return Promise.reject(null);
+      $('#msg').textContent = '存檔中…';
+      const used = new Set(rows.flatMap(r => r.cells).filter(Boolean));
+      const day = {
+        rows: rows.map(r => ({ label: r.label, cells: r.cells, type: r.type, place: r.place || '', text: r.text || '', code: r.code || '', category: r.category || '', item: r.item || '', ev: r.ev || '' })),
+        people: D.people.concat(D.off.filter(p => used.has(String(p.num)))).map(p => ({ num: p.num, name: p.name, code: p.code })), memo: $('#memo').value,
+        car: nums($('#car').value), pe: nums($('#pe').value), sub: subs(), skip, ot: otOfDay(),
+      };
+      return call('saveDay', D.date, day, D.version).then(r => {
+        dirty = false; saveDraft();
+        const ot = day.ot, names = Object.keys(ot);
+        const note = (names.length ? `停休登記：${names.map(n => n + ' ' + ot[n]).join('、')}。` : '') +
+          (r.otError ? `（停休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '');
+        return load((r.existed ? '已異動存檔。' : '已存檔。') + note);
+      });
+    };
+    // 輸出勤務表＝存檔＋輸出（停休、駕訓登記跟著存檔一起更新）；只能看的人直接輸出
+    $('#out').onclick = () => {
+      if (!D) return;
+      if (!edit) return showSheet();
+      doSave().then(() => showSheet()).catch(e => { if (e) $('#msg').textContent = '錯誤：' + e.message; });
+    };
     // 勤務表蓋在整個畫面上、直接掛在 body 底下，列印時只印它
     const sheetBox = () => {
       let el = document.getElementById('sheet');
@@ -1545,7 +1582,21 @@
         set(col, 5, join(rows.filter(r => groupOf(r) === '二救').map(r => at(r, h))));
         set(col, 6, join(rows.filter(r => r.type === '休息').map(r => at(r, h))));
         ['防災宣導', '水源調查', '其他臨時勤務'].forEach((place, i) =>
-          set(col, 7 + i, join(rows.filter(r => r.type === '外勤' && r.place === place).map(r => at(r, h)))));
+          set(col, 7 + i, join(rows.filter(r => r.type === '外勤' && r.place === place).map(r => (at(r, h) === ALL ? ALL_TEXT : at(r, h))))));
+      });
+      // 在隊全體同仁：那幾個小時的格子合併成一格，寫「在隊全體同仁.其他人」
+      const merges = [];
+      ['防災宣導', '水源調查', '其他臨時勤務'].forEach((place, i) => {
+        const list = rows.filter(r => r.type === '外勤' && r.place === place);
+        list.filter(r => r.cells.includes(ALL)).forEach(r => {
+          const a = r.cells.indexOf(ALL); let b = a; while (b < 24 && r.cells[b] === ALL) b++;
+          if (merges.some(x => x.row === 7 + i && x.a < b && a < x.b)) return;
+          const others = [];
+          for (let h = a; h < b; h++) list.forEach(x => { const v = x.cells[h]; if (v && v !== ALL && !others.includes(v)) others.push(v); });
+          for (let h = a; h < b; h++) set(h + 3, 7 + i, '');
+          set(a + 3, 7 + i, [ALL_TEXT].concat(others).join('.'));
+          if (b - a > 1) merges.push({ row: 7 + i, a, b });
+        });
       });
 
       // 備註、搶救演練及訓練（同 VBA：同一個勤務、同一個開始時間的人用「.」接在後面）
@@ -1554,8 +1605,10 @@
         rows.filter(r => r.type === '外勤' && texts.includes(r.text)).forEach(r => {
           const a = r.cells.findIndex(Boolean); if (a < 0) return;
           let b = a; while (b < 24 && r.cells[b]) b++;
-          if (last && last.label === r.label && last.a === a) out += '.' + r.cells[a];
-          else { out += `  (${HOURS[a]}-${b >= 24 ? '08' : HOURS[b]}時)${r.label}:${r.cells[a]}`; last = { label: r.label, a }; }
+          // 休假被排來的人番號後面加（停休）；「全」寫成在隊全體同仁
+          const v = r.cells[a], who = v === ALL ? ALL_TEXT : (pm()[v] || {}).off ? v + '(停休)' : v;
+          if (last && last.label === r.label && last.a === a) out += '.' + who;
+          else { out += `  (${HOURS[a]}-${b >= 24 ? '08' : HOURS[b]}時)${r.label}:${who}`; last = { label: r.label, a }; }
         });
         return out;
       };
@@ -1655,9 +1708,11 @@
       // 備註、搶救演練及訓練一行放不下的項目整個移到下一行。寬度用欄寬估（數字、英文算半個字）
       const S42 = window.SHEET42, em = t => [...t].reduce((a, ch) => a + (/[\u0000-\u00ff]/.test(ch) ? 0.5 : 1), 0);
       HOURS.forEach((x, h) => {
-        const cap = (S42.cols[h + 2] - 6) / 24;           // 13 號字一個字約 24px
+        const cap1 = (S42.cols[h + 2] - 6) / 24;          // 13 號字一個字約 24px
         for (let r = 3; r <= 9; r++) {
           const k = COLS[h + 2] + r, parts = (V[k] || '').split('.');
+          const mg = merges.find(x => x.row === r && x.a === h);
+          const cap = mg ? (S42.cols.slice(h + 2, mg.b + 2).reduce((a, b) => a + b, 0) - 6) / 24 : cap1;
           if (!V[k] || em(V[k]) <= cap) continue;
           const lines = [];
           parts.forEach(p => { const last = lines.length - 1; if (last >= 0 && em(lines[last] + '.' + p) <= cap) lines[last] += '.' + p; else lines.push(p); });
@@ -1682,7 +1737,10 @@
       const byRow = {};
       S.cells.forEach(c => (byRow[c[0]] = byRow[c[0]] || []).push(c));
       const AL = { l: 'left', c: 'center', r: 'right', '': 'left' }, VA = { t: 'top', c: 'middle', b: 'bottom', '': 'middle' };
-      const body = S.rows.map((ht, i) => `<tr style="height:${ht}px">` + (byRow[i + 1] || []).map(([r, c, rs, cs, v, fs, b, ha, va]) => {
+      const spanOf = (r, c) => { const x = merges.find(g => g.row === r && g.a + 3 === c); return x ? x.b - x.a : 0; };
+      const hidden = (r, c) => merges.some(g => g.row === r && c > g.a + 3 && c < g.b + 3);
+      const body = S.rows.map((ht, i) => `<tr style="height:${ht}px">` + (byRow[i + 1] || []).filter(([r, c]) => !hidden(r, c)).map(([r, c, rs, cs, v, fs, b, ha, va]) => {
+        if (spanOf(r, c)) { cs = spanOf(r, c); ha = 'c'; }
         const key = COLN[c - 1] + r, val = key in V ? V[key] : v;
         const h = ha || (r === 13 || r === 15 || r === 32 ? 'l' : '');
         return `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''} class="${key === 'A2' ? 'diag' : ''}" style="font-size:${fs}pt;${b ? 'font-weight:700;' : ''}text-align:${AL[h] || 'left'};vertical-align:${VA[va] || 'middle'}">${esc(val).replace(/\n/g, '<br>')}</td>`;
@@ -1692,7 +1750,7 @@
           ${warn.map(t => `<div class="err">${esc(t)}</div>`).join('')}</div>
         <div class="s42wrap" style="--pz:${z.toFixed(4)}"><table class="s42" style="width:${W}px"><colgroup>${S.cols.map(px => `<col style="width:${px}px">`).join('')}</colgroup>${body}</table></div>`;
       document.getElementById('sheet').scrollTop = 0;
-      document.getElementById('sxlsx').onclick = () => excelOut(V);
+      document.getElementById('sxlsx').onclick = () => excelOut(V, merges);
       document.getElementById('snfa').onclick = () => nfaOut(V);
     }).catch(e => alert(e.message));
 
@@ -1705,7 +1763,7 @@
     }));
     const b64ToBuf = b64 => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0)).buffer;
     const colNum = s => [...s].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
-    const fillSheet = (xml, V) => {
+    const fillSheet = (xml, V, merges = []) => {
       const doc = new DOMParser().parseFromString(xml, 'application/xml'), NS = doc.documentElement.namespaceURI;
       const data = doc.getElementsByTagNameNS(NS, 'sheetData')[0], rowOf = {};
       [...data.children].forEach(r => { rowOf[r.getAttribute('r')] = r; });
@@ -1726,9 +1784,22 @@
         t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
         t.textContent = v;
       });
+      // 合併儲存格（在隊全體同仁那幾個小時）
+      if (merges.length) {
+        let mc = doc.getElementsByTagNameNS(NS, 'mergeCells')[0];
+        if (!mc) {
+          const AFTER = ['sheetCalcPr', 'sheetProtection', 'protectedRanges', 'scenarios', 'autoFilter', 'sortState', 'dataConsolidate', 'customSheetViews'];
+          let ref = data.nextSibling;
+          while (ref && ref.nodeType === 1 && AFTER.includes(ref.localName)) ref = ref.nextSibling;
+          mc = el('mergeCells', doc.documentElement, ref);
+        }
+        merges.forEach(g => { el('mergeCell', mc).setAttribute('ref', `${COLS_X[g.a + 2]}${g.row}:${COLS_X[g.b + 1]}${g.row}`); });
+        mc.setAttribute('count', String(mc.getElementsByTagNameNS(NS, 'mergeCell').length));
+      }
       return new XMLSerializer().serializeToString(doc);
     };
-    const excelOut = V => {
+    const COLS_X = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const excelOut = (V, merges) => {
       const msg = t => { const e = document.getElementById('smsg'); if (e) e.innerHTML = t; };
       const btn = document.getElementById('sxlsx'); if (btn) btn.disabled = true;
       msg('<span class="muted">產生 Excel 中…</span>');
@@ -1737,7 +1808,7 @@
         if (!t.data) throw new Error(`資料庫還沒有勤務表範本：請把「${t.name}」放到系統帳號雲端硬碟的「${t.folder}」資料夾`);
         return JSZip.loadAsync(b64ToBuf(t.data), { createFolders: false });
       }).then(zip => zip.file(SHEET).async('string').then(xml => {
-        zip.file(SHEET, fillSheet(xml, V), { createFolders: false });
+        zip.file(SHEET, fillSheet(xml, V, merges), { createFolders: false });
         return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       })).then(blob => {
         const a = document.createElement('a');
@@ -1788,9 +1859,11 @@
         // 勤務（第 4–14 列）、備勤（第 15 列＝當時沒排勤務的在隊人員）
         for (let h = 0; h < 24; h++) {
           const at = {};
-          rows.forEach(r => { const v = r.cells[h]; if (v) (at[nfaRow(r)] = at[nfaRow(r)] || []).push(v); });
+          // 在隊全體同仁＝那時候的備勤人員全部參加，展開成番號；備勤那一格就空著
+          const sb = standby(h).map(p => p.num).sort(byNum), all = rows.some(r => r.cells[h] === ALL);
+          rows.forEach(r => { const v = r.cells[h]; if (v) (at[nfaRow(r)] = at[nfaRow(r)] || []).push(...(v === ALL ? sb : [v])); });
           Object.entries(at).forEach(([row, list]) => { N[COL[h] + row] = cj(list); });
-          N[COL[h] + 15] = cj(standby(h).map(p => p.num).sort(byNum));
+          N[COL[h] + 15] = all ? '' : cj(sb);
         }
         // 單位人員請休假表不用填：消防署網站會讀自己的資料（瑋哥 2026-11-11）
         N.E20 = V.P32;                                     // 出動梯次

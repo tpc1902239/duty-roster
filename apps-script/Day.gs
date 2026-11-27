@@ -281,6 +281,8 @@ function saveDay(token, date, day, version) {
   });
   // 駕訓學員的日期自動登記（失敗不影響存檔）
   try { drillAuto_(date, day); } catch (e) { out.drillError = e.message; }
+  // 停休登記：這天的停休／休息超時（排班區算好的）整天寫進停休表（失敗不影響存檔）
+  if (day.ot) try { out.otCount = otDayAuto_(date, day.ot, s); } catch (e) { out.otError = e.message; }
   return out;
 }
 

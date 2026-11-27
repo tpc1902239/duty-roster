@@ -70,7 +70,7 @@ function drillTrainees_(rows) {
   const drill = rows.filter(r => str_(r.item) === DRILL_ITEM);
   const out = {}, add = n => { out[n] = (out[n] || 0) + 1; };
   const pairsAt = h => {
-    const who = drill.map(r => str_(r.cells[h])).filter(Boolean), ps = [];
+    const who = drill.map(r => str_(r.cells[h])).filter(x => x && x !== '全'), ps = [];   // 「全」＝在隊全體同仁，不算學員
     for (let k = 0; k + 1 < who.length; k += 2) ps.push(who[k] + '|' + who[k + 1]);
     return ps;
   };
