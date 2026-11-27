@@ -275,7 +275,10 @@ function saveDay(token, date, day, version) {
     const sh = ss.getSheetByName(name) || ss.insertSheet(name);
     sh.clear();
     sh.getRange(1, 1, all.length, SAVE_W).setNumberFormat('@').setValues(all);
-    all.forEach((r, i) => { if (r[1] === '08' && /^\d+$/.test(r[0])) sh.getRange(i + 1, 1, 1, SAVE_W).setFontWeight('bold').setBackground('#ddebf7'); });
+    // 每天的標題列一次設好格式（一列一列設很慢）
+    const heads = [];
+    all.forEach((r, i) => { if (r[1] === '08' && /^\d+$/.test(r[0])) heads.push('A' + (i + 1) + ':' + colA1_(SAVE_W) + (i + 1)); });
+    if (heads.length) sh.getRangeList(heads).setFontWeight('bold').setBackground('#ddebf7');
     log_(s.user, existed ? '異動勤務表' : '存檔勤務表', date + '：' + day.rows.length + ' 列');
     return { existed };
   });
@@ -380,4 +383,11 @@ function saveSheetFile(token, date, data) {
   const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(data), MimeType.MICROSOFT_EXCEL, name));
   log_(s.user, '輸出勤務表', date);
   return { url: file.getUrl(), path: SHEET_FOLDER + '/' + ym + '/' + name };
+}
+
+/** 第 n 欄的欄名（1 → A、27 → AA）。 */
+function colA1_(n) {
+  let out = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) out = String.fromCharCode(65 + (n - 1) % 26) + out;
+  return out;
 }
