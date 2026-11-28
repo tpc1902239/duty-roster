@@ -16,7 +16,7 @@
     const r = x => me.roles.includes(x);
     if (id === 'leave') return r('假表承辦') ? '改' : '';
     if (id === 'tables') return r('車輛承辦') || r('救護訓練承辦') ? '改' : '';
-    return r('排班') && ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill', 'overtime'].includes(id) ? '改' : '看';
+    return r('排班') && ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill', 'water', 'overtime'].includes(id) ? '改' : '看';
   };
   const canSee = id => !!permOf(id);
   const canEdit = id => permOf(id) === '改';
@@ -65,6 +65,7 @@
     { id: 'colors', name: '排班區顏色', perm: true },
     { id: 'staff', name: '編制人員', perm: true },
     { id: 'drill', name: '駕訓登記', perm: true },
+    { id: 'water', name: '水源登記', perm: true },
     { id: 'overtime', name: '停補休登記', perm: true },
     { id: 'leave', name: '匯入假表', perm: true },
     { id: 'tables', name: '車輛／救護訓練', perm: true },
@@ -82,7 +83,7 @@
       pages.map(p => `<a data-p="${p.id}" class="${p.id === id ? 'on' : ''}">${p.name}</a>`).join('')
     }<a data-p="logout">登出</a></nav><span class="who">${esc(me.name)}${isAdmin() ? '（管理員）' : ''}</span></header><main id="main"></main>`;
     app.querySelectorAll('nav a').forEach(a => { a.onclick = () => (a.dataset.p === 'logout' ? logout() : route(a.dataset.p)); });
-    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, overtime: pageOvertime, leave: pageLeave, tables: pageTables, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
+    ({ day: pageDay, saves: pageSaves, items: pageItems, colors: pageColors, month: pageMonth, shiftdefs: pageShiftDefs, staff: pageUnitStaff, drill: pageDrill, water: pageWater, overtime: pageOvertime, leave: pageLeave, tables: pageTables, accounts: pageAccounts, log: pageLog, password: pagePassword })[id](document.getElementById('main'));
   }
 
   // ---------- 共用：月班表表格 ----------
@@ -418,6 +419,60 @@
 
   const DRILL_MAX = 4;
   const drillDone = r => r.dates.slice(0, r.need).filter(Boolean).length >= r.need;
+
+  // ---------- 水源登記 ----------
+  // 每年一張：梯次、上半年／下半年的日期和檢查人員。排班區存檔時，外勤「水源第1-1梯」會自動把那半年的日期和人員寫進來。
+  const waterHalf = date => (Number(date.slice(5, 7)) <= 6 ? 'h1' : 'h2');
+  const dayLabel = date => Number(date.slice(5, 7)) + '月' + Number(date.slice(8, 10)) + '日';
+
+  function pageWater(main) {
+    const edit = canEdit('water');
+    main.innerHTML = `<h1>水源登記</h1>
+      <div class="muted">每個梯次上半年、下半年各做一次。排班區排了外勤「水源」並存檔，那個梯次這半年的日期和檢查人員會自動填上；從排班區刪掉或改掉，也會跟著清掉。這裡也可以手動改、新增梯次。</div>
+      <div class="card bar"><label>年度 <input id="yr" type="number" min="2020" max="2100" style="width:80px"></label>
+        ${edit ? '<button id="save">儲存</button>' : ''} <span id="msg" class="muted"></span></div>
+      <div class="card"><div class="scroll" id="list"></div>
+        ${edit ? '<p><input id="nb" placeholder="新梯次，例如 14-1" size="14"> <button class="plain" id="addb">＋ 新增梯次</button></p>' : ''}</div>`;
+    const $ = s => main.querySelector(s);
+    $('#yr').value = new Date(Date.now() + 8 * 3600e3).getUTCFullYear();
+    let rows = [], version = 0;
+    const dis = edit ? '' : 'disabled';
+    const cell = (r, k, ph, size) => `<td class="${r[k.replace('p', 'h')] ? 'done' : ''}"><input class="${k}" value="${esc(r[k])}" size="${size}" placeholder="${ph}" ${dis}></td>`;
+    const draw = () => {
+      $('#list').innerHTML = `<table class="defs water"><tr><th rowspan="2">梯次</th><th colspan="2">上半年</th><th colspan="2">下半年</th>${edit ? '<th rowspan="2"></th>' : ''}</tr>
+        <tr><th>日期</th><th>檢查人員</th><th>日期</th><th>檢查人員</th></tr>${rows.map((r, k) => `<tr data-k="${k}">
+        <td><b>${esc(r.batch)}</b></td>${cell(r, 'h1', '例如 3月5日', 8)}${cell(r, 'p1', '番號', 10)}${cell(r, 'h2', '例如 9月5日', 8)}${cell(r, 'p2', '番號', 10)}
+        ${edit ? `<td>${r.h1 || r.h2 ? '' : '<button class="plain del">刪除</button>'}</td>` : ''}</tr>`).join('')}</table>
+        <div class="muted" style="margin-top:6px">上半年已做 ${rows.filter(r => r.h1).length}／${rows.length}，下半年已做 ${rows.filter(r => r.h2).length}／${rows.length}。綠色＝已做。</div>`;
+    };
+    const read = () => main.querySelectorAll('tr[data-k]').forEach(tr => {
+      const r = rows[Number(tr.dataset.k)];
+      ['h1', 'p1', 'h2', 'p2'].forEach(k => { r[k] = tr.querySelector('.' + k).value.trim(); });
+    });
+    const load = (done = '') => call('getWater', Number($('#yr').value)).then(x => {
+      rows = x.rows; version = x.version; draw(); $('#msg').textContent = done;
+    }).catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+    $('#yr').onchange = () => load();
+    if (edit) {
+      $('#list').addEventListener('input', () => { read(); $('#msg').textContent = '尚未儲存'; });
+      $('#list').onclick = e => {
+        const b = e.target.closest('.del'); if (!b) return;
+        read(); rows.splice(Number(b.closest('tr').dataset.k), 1); draw(); $('#msg').textContent = '尚未儲存';
+      };
+      $('#addb').onclick = () => {
+        const b = $('#nb').value.trim(); if (!b) return;
+        read();
+        if (rows.some(r => r.batch === b)) { $('#msg').textContent = '已經有梯次 ' + b; return; }
+        rows.push({ batch: b, h1: '', p1: '', h2: '', p2: '' }); $('#nb').value = ''; draw(); $('#msg').textContent = '尚未儲存';
+      };
+      $('#save').onclick = () => {
+        read(); $('#msg').textContent = '儲存中…';
+        call('saveWater', Number($('#yr').value), rows, version).then(x => load(`已儲存 ${x.count} 個梯次。`))
+          .catch(e => { $('#msg').textContent = '錯誤：' + e.message; });
+      };
+    }
+    load();
+  }
 
   function pageDrill(main) {
     const edit = canEdit('drill');
@@ -1087,14 +1142,23 @@
       if (!edit) return;
       $('#addx').innerHTML = `<div class="hbar"><h2>新增勤務</h2><button id="addgo">加入勤務</button></div>
         <div class="row"><select id="it">${D.items.map((x, k) => `<option value="${k}">${esc(x.name)}</option>`).join('')}</select>
-          <input id="itx" placeholder="內容" size="10" hidden>
+          <input id="itx" placeholder="內容" size="10" hidden><select id="itw" hidden title="綠色＝這半年已經排過"></select>
           <select id="st">${HOURS.map((h, i) => `<option value="${i}">${h}</option>`).join('')}</select> 到
           <select id="en"></select></div>
         <div class="muted">勾要出勤的人（<span class="busytag">橘色</span>＝那段時間已經有排${'<span id="drtag" hidden>；<span class="drilltag">綠色</span>＝這個月駕訓已滿</span>'}）：</div><div class="chips" id="who"></div>
         <div class="muted">沒勾人就加一列空的，之後再填。</div>`;
       const it = () => D.items[Number($('#it').value)];
       const refresh = () => {
-        $('#itx').hidden = !it().label.includes('{}');
+        // 水源：內容改成梯次下拉選單，這半年已排過的綠色
+        const isWater = it().name === '水源';
+        $('#itx').hidden = isWater || !it().label.includes('{}');
+        $('#itw').hidden = !isWater;
+        if (isWater) {
+          const half = waterHalf(D.date), cur = $('#itw').value, list = D.water || [];
+          $('#itw').innerHTML = list.map(w => `<option value="${esc(w.batch)}" class="${w[half] ? 'wdone' : ''}">${esc(w.batch)}${w[half] ? '（已排 ' + esc(w[half]) + '）' : ''}</option>`).join('');
+          $('#itw').value = list.some(w => w.batch === cur) ? cur : ((list.find(w => !w[half]) || list[0] || {}).batch || '');
+          $('#itw').classList.toggle('wdone', !!(list.find(w => w.batch === $('#itw').value) || {})[half]);
+        }
         $('#drtag').hidden = it().name !== '駕訓';
         const a = Number($('#st').value), b = Number($('#en').value);
         const busy = new Set(); for (let h = a; h < b; h++) busyAt(h).forEach(v => busy.add(v));
@@ -1115,11 +1179,13 @@
       };
       $('#st').onchange = () => { ends(); refresh(); };
       $('#it').onchange = $('#en').onchange = refresh;
+      $('#itw').onchange = refresh;
       $('#st').value = 0; ends();
       $('#addgo').onclick = () => {
         const x = it(), a = Number($('#st').value), b = Number($('#en').value);
-        if (x.label.includes('{}') && !$('#itx').value.trim()) { $('#msg').textContent = `請輸入「${x.name}」的內容。`; $('#itx').focus(); return; }
-        const label = x.label ? x.label.replace('{}', $('#itx').value.trim()) : x.name;
+        const content = x.name === '水源' ? $('#itw').value : $('#itx').value.trim();
+        if (x.label.includes('{}') && !content) { $('#msg').textContent = `請輸入「${x.name}」的內容。`; $('#itx').focus(); return; }
+        const label = x.label ? x.label.replace('{}', content) : x.name;
         const who = [...main.querySelectorAll('#who input:checked')].map(i => i.value);
         addOuter(x, label, who.length ? who : [''], a, b);
         $('#msg').textContent = `已加入「${label}」${who.length || 1} 列。`;
@@ -1282,6 +1348,13 @@
       if (many.length) add('提醒', `同時休息超過 ${D.settings.restMax} 人：${hoursText(many)}`);
       // 外勤列沒排到人：整列空白才算（時段可能臨時調整，不看原本的時段；同 4.2 版）
       rows.forEach(r => { if (r.type === '外勤' && !r.cells.some(Boolean)) add('提醒', `外勤「${r.label}」還沒排人`); });
+      // 水源：這個梯次這半年已經在別天排過
+      const half = waterHalf(D.date), today = dayLabel(D.date);
+      rows.forEach(r => {
+        const m = r.item === '水源' && String(r.label).match(/第\s*(.+?)\s*梯/); if (!m) return;
+        const w = (D.water || []).find(x => x.batch === m[1]);
+        if (w && w[half] && w[half] !== today) add('提醒', `水源第 ${m[1]} 梯這半年已經排過（${w[half]}），存檔後會改成今天`);
+      });
       const wd = new Date(D.date + 'T12:00:00+08:00').getDay();
       if ([1, 3, 5].includes(wd) && !rows.some(r => r.item === '大隊送公文')) add('提醒', '今天星期' + WEEK[wd] + '，沒有排大隊送公文');
       if (carDay(D) && !nums($('#car').value).length) add('提醒', '今天要車輛保養，還沒排人');
@@ -1473,8 +1546,9 @@
       const [y, m] = ym($('#date').value);
       const table = kind => call('getTable', y, m, kind).then(t => t.rows).catch(() => []);
       const drill = call('getDrill', y, m).then(r => r.rows).catch(() => []);
-      return Promise.all([call('getDay', $('#date').value), table('車輛'), table('救護訓練'), drill])
-        .then(([d, car, train, dr]) => Object.assign(d, { cars: car, trains: train, drill: dr }))
+      const water = call('getWater', y).then(r => r.rows).catch(() => []);
+      return Promise.all([call('getDay', $('#date').value), table('車輛'), table('救護訓練'), drill, water])
+        .then(([d, car, train, dr, wa]) => Object.assign(d, { cars: car, trains: train, drill: dr, water: wa }))
         .then(d => {
           // 有草稿也有存檔：存檔比草稿新（例如別人在別台電腦存過）就先顯示存檔
           const dr = dayDrafts()[d.date], savedAt = d.saved && Date.parse(String(d.saved.savedAt).replace(' ', 'T') + ':00+08:00');
@@ -1533,13 +1607,14 @@
         dirty = false; saveDraft();
         const ot = day.ot, names = Object.keys(ot);
         const note = (names.length ? `停補休登記：${names.map(n => n + ' ' + ot[n]).join('、')}。` : '') +
-          (r.otError ? `（停補休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '');
+          (r.otError ? `（停補休登記沒寫進去：${r.otError}）` : '') + (r.drillError ? `（駕訓登記沒更新：${r.drillError}）` : '') + (r.waterError ? `（水源登記沒更新：${r.waterError}）` : '');
         // 不重新讀整天（很慢）：版本號和「已存檔」直接更新在畫面上；駕訓登記另外在背景重讀（新增勤務的「駕訓已滿」顏色用）
         D.version = r.version;
         D.saved = Object.assign({}, day, { rows: day.rows.map(x => Object.assign({}, x, { cells: x.cells.slice() })), savedBy: me.name, savedAt: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') });
         start(D, 'saved', (r.existed ? '已異動存檔。' : '已存檔。') + note);
         const [y, m] = ym(D.date);
         call('getDrill', y, m).then(x => { D.drill = x.rows; }).catch(() => {});
+        call('getWater', y).then(x => { D.water = x.rows; drawAdd(); }).catch(() => {});
       });
     };
     // 輸出勤務表＝存檔＋輸出（停休、駕訓登記跟著存檔一起更新）；只能看的人直接輸出

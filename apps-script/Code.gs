@@ -19,7 +19,7 @@ function doGet() {
 const api_ = () => ({
   needsSetup, setupAdmin, login, logout, changePassword, listAccounts, saveAccount, deleteAccount, recentLog,
   loadDay, getShiftDefs, saveShiftDefs, getMonth, importLeave, saveShifts, getShiftCounts, getTable, saveTable, getUnitStaff, saveUnitStaff, saveBase,
-  getItems, saveItems, getDay, saveDay, saveMemo, getColors, saveColors, getSheetTemplate, saveSheetFile, getDrill, saveDrill, getSaveMonth,
+  getItems, saveItems, getDay, saveDay, saveMemo, getColors, saveColors, getSheetTemplate, saveSheetFile, getDrill, saveDrill, getWater, saveWater, getSaveMonth,
   getOvertime, saveOvertime, saveFull, saveOtRules,
 });
 
@@ -183,7 +183,8 @@ function splitNames_(text) {
 /** 某一天的日曆勤務，並把人名對應到人員。 */
 function calendarOn_(date) {
   const people = peopleOn_(date);
-  const find = name => people.find(p => p.name === name || p.alias.includes(name) || String(p.num) === name);
+  // 番號可以寫 01＝1
+  const find = name => people.find(p => p.name === name || p.alias.includes(name) || String(p.num) === name || (/^\d+$/.test(name) && Number(name) === Number(p.num)));
   const start = new Date(date + 'T00:00:00+08:00');
   const end = new Date(start.getTime() + 24 * 3600 * 1000);
   return calendar_().getEvents(start, end).map(ev => {
