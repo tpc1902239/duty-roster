@@ -184,3 +184,6 @@ table.otfull th.name { line-height:1.15; padding:4px 2px; vertical-align:top; }
 table.grid.day td.allp { background:#dbe9ff; color:#1e6ee6; font-weight:700; }
 #who label.allbox { font-weight:700; color:#1e6ee6; }
 button.danger { color:#d0021b; border-color:#d0021b; }
+/* 水源：這半年已排過的梯次 */
+table.water td.done, table.water td.done input { background:#c8f0c8; }
+#itw option.wdone, #itw.wdone { background:#c8f0c8; }

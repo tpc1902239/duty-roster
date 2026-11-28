@@ -8,7 +8,7 @@ const ROLES = ['排班', '假表承辦', '車輛承辦', '救護訓練承辦', '
 /** 可以設權限的頁面（id 跟網頁一致）。管理員全部都能改，另外只有管理員看得到帳號管理、操作紀錄。 */
 const PERM_PAGES = [
   ['day', '排班區'], ['saves', '存檔區'], ['month', '月班表'], ['shiftdefs', '固定排班設定'], ['items', '外勤項目設定'],
-  ['colors', '排班區顏色'], ['staff', '編制人員'], ['drill', '駕訓登記'], ['overtime', '停休登記'], ['leave', '匯入假表'], ['tables', '車輛／救護訓練'],
+  ['colors', '排班區顏色'], ['staff', '編制人員'], ['drill', '駕訓登記'], ['water', '水源登記'], ['overtime', '停休登記'], ['leave', '匯入假表'], ['tables', '車輛／救護訓練'],
 ];
 const PERM_LEVELS = ['', '看', '改'];
 const SESSION_SECONDS = 6 * 3600;
@@ -52,7 +52,7 @@ function permsText_(perms) {
 function permsFromRoles_(roles) {
   const out = {};
   PERM_PAGES.forEach(p => { out[p[0]] = '看'; });
-  if (roles.includes('排班')) ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill', 'overtime'].forEach(k => { out[k] = '改'; });
+  if (roles.includes('排班')) ['day', 'month', 'shiftdefs', 'items', 'colors', 'drill', 'water', 'overtime'].forEach(k => { out[k] = '改'; });
   if (roles.includes('假表承辦')) out.leave = '改';
   if (roles.includes('車輛承辦') || roles.includes('救護訓練承辦')) out.tables = '改';
   if (!roles.includes('假表承辦')) delete out.leave;
